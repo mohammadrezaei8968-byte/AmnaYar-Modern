@@ -117,7 +117,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.2.0', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {

@@ -1,123 +1,42 @@
-<!doctype html>
-<html lang="fa" dir="rtl">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#0b2a55">
-  <link rel="icon" href="/assets/logo-amnayar.png">
-  <link rel="stylesheet" href="/styles.css">
-  <title>داشبورد | امنا یار</title>
-</head>
-<body class="dashboard-page">
-<header class="nav dashboard-nav">
-  <a class="brand" href="/"><img src="/assets/logo-amnayar.png" alt="امنا یار"><span>امنا یار<small>داشبورد کاربر</small></span></a>
-  <div class="nav-actions">
-    <span id="topUsername" class="user-chip">کاربر</span>
-    <a class="btn soft hide-mobile" href="/#services">خدمات</a>
-    <button class="btn primary" onclick="logout()">خروج</button>
-  </div>
-</header>
-
+<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#081b36"><link rel="icon" href="/assets/logo-amnayar.png"><link rel="stylesheet" href="/styles.css"><title>داشبورد | امنا یار</title></head><body class="dashboard-page">
+<header class="nav dashboard-nav"><a class="brand" href="/"><img src="/assets/logo-amnayar.png"><span>امنا یار<small>مرکز خدمات و استعلام</small></span></a><div class="nav-actions"><span id="topUsername" class="user-chip">کاربر</span><a class="btn soft hide-mobile" href="/#services">صفحه اصلی</a><button class="btn primary" onclick="logout()">خروج</button></div></header>
 <main class="dash">
-  <section class="dash-welcome">
-    <div>
-      <span class="pill">پنل شخصی امنا یار</span>
-      <h1>سلام، <strong id="welcomeName">کاربر</strong> 👋</h1>
-      <p>اعتبارسنجی‌های رایگان را همین‌جا انجام دهید؛ نتیجه‌های اخیر شما نیز در همین صفحه ثبت می‌شوند.</p>
-    </div>
-    <div class="dash-badge"><span>●</span> سرویس رایگان و فعال</div>
-  </section>
-
-  <div class="dash-grid">
-    <aside class="dash-sidebar">
-      <div class="panel profile-card">
-        <div class="profile-avatar" id="avatar">ا</div>
-        <h3 id="name">در حال بارگذاری...</h3>
-        <p id="email" class="muted"></p>
-        <div class="profile-line"><span>وضعیت حساب</span><b>فعال</b></div>
-        <div class="profile-line"><span>خدمات</span><b>رایگان</b></div>
-        <div class="profile-line"><span>خرید اعتبار</span><b>لازم نیست</b></div>
-      </div>
-      <div class="panel side-note">
-        <span class="note-icon">✓</span>
-        <div><b>حریم خصوصی</b><p>اطلاعات خام استعلام‌ها ذخیره نمی‌شود؛ فقط نتیجه و شناسه رمزنگاری‌شده برای سابقه ثبت می‌شود.</p></div>
-      </div>
-    </aside>
-
-    <section class="dash-main">
-      <div class="panel checker-panel">
-        <div class="section-title-row">
-          <div><span class="eyebrow">ابزارهای اصلی</span><h2>چه چیزی را می‌خواهید بررسی کنید؟</h2></div>
-          <span class="free-chip">رایگان ∞</span>
-        </div>
-        <div class="checker-grid">
-          <button class="checker-card national-card" onclick="openChecker('national')">
-            <span class="checker-icon">کد</span><span><b>کد ملی</b><small>بررسی ساختار و رقم کنترلی</small></span><i>←</i>
-          </button>
-          <button class="checker-card card-card" onclick="openChecker('card')">
-            <span class="checker-icon">▣</span><span><b>شماره کارت</b><small>بررسی شماره کارت و بانک</small></span><i>←</i>
-          </button>
-          <button class="checker-card iban-card" onclick="openChecker('iban')">
-            <span class="checker-icon">IR</span><span><b>شماره شبا</b><small>بررسی ساختار شبا و بانک</small></span><i>←</i>
-          </button>
-        </div>
-
-        <div id="checkerBox" class="checker-box hidden">
-          <div class="checker-box-head">
-            <div><span id="checkerIcon" class="checker-icon">کد</span><div><h3 id="checkerTitle">کد ملی</h3><p id="checkerHint">بررسی ساختاری</p></div></div>
-            <button class="icon-btn" onclick="closeChecker()" aria-label="بستن">×</button>
-          </div>
-          <form id="checkForm" class="check-form" onsubmit="submitCheck(event)">
-            <label id="inputLabel" for="checkInput">کد ملی</label>
-            <div class="input-wrap"><input id="checkInput" autocomplete="off" inputmode="numeric" placeholder="مثلاً ۰۰۱۲۳۴۵۶۷۸"><button type="button" class="clear-input" onclick="clearInput()">پاک کردن</button></div>
-            <p id="inputHelp" class="field-help">اعداد فارسی و انگلیسی پذیرفته می‌شوند.</p>
-            <button class="btn primary xl full" id="submitBtn">بررسی رایگان</button>
-          </form>
-          <div id="result" class="result-box hidden"></div>
-        </div>
-      </div>
-
-      <div class="panel extras-panel">
-        <div class="section-title-row"><div><span class="eyebrow">ابزارهای بیشتر</span><h2>بررسی‌های ساختاری</h2><p class="muted">این موارد فقط قالب و ساختار ورودی را بررسی می‌کنند و استعلام رسمی مالکیت یا سوابق نیستند.</p></div></div>
-        <div class="extra-grid">
-          <button class="extra-card" onclick="localCheck('company')"><span>شناسه</span><b>شناسه ملی شرکت</b><small>۱۱ رقم</small></button>
-          <button class="extra-card" onclick="localCheck('postal')"><span>پست</span><b>کد پستی</b><small>۱۰ رقم</small></button>
-          <button class="extra-card" onclick="localCheck('mobile')"><span>۰۹</span><b>شماره موبایل</b><small>قالب ایران</small></button>
-          <button class="extra-card" onclick="localCheck('tracking')"><span>۲۴</span><b>رهگیری پستی</b><small>کد رهگیری</small></button>
-          <button class="extra-card" onclick="localCheck('vin')"><span>VIN</span><b>شماره شاسی</b><small>۱۷ کاراکتر</small></button>
-          <button class="extra-card" onclick="localCheck('plate')"><span>پلاک</span><b>پلاک خودرو</b><small>قالب ایران</small></button>
-          <button class="extra-card" onclick="localCheck('sayadi')"><span>صیاد</span><b>شناسه صیادی</b><small>۱۶ رقم</small></button>
-          <button class="extra-card" onclick="localCheck('account')"><span>حساب</span><b>شماره حساب</b><small>۸ تا ۱۹ رقم</small></button>
-        </div>
-      </div>
-
-      <div class="panel history-panel">
-        <div class="section-title-row"><div><span class="eyebrow">سوابق</span><h2>آخرین بررسی‌های شما</h2></div><span class="history-count" id="historyCount">۰ مورد</span></div>
-        <div class="table-wrap"><table class="table"><thead><tr><th>نوع</th><th>نتیجه</th><th>زمان</th></tr></thead><tbody id="history"></tbody></table></div>
-        <div id="emptyHistory" class="empty-history hidden"><span>◌</span><b>هنوز بررسی‌ای ثبت نشده</b><p>اولین بررسی را از ابزارهای بالا شروع کنید.</p></div>
-      </div>
-    </section>
-  </div>
-</main>
-
+<section class="dash-welcome"><div><span class="pill">داشبورد شخصی</span><h1>سلام، <strong id="welcomeName">کاربر</strong> 👋</h1><p>از اینجا هم استعلام‌های رسمی را باز کنید، هم ابزارهای رایگان داخلی را اجرا کنید.</p></div><div class="dash-badge"><span>●</span> خدمات رایگان فعال</div></section>
+<div class="dash-stat-row"><div class="stat-card"><span>خدمات رسمی</span><b>۸+</b><small>دسترسی مستقیم</small></div><div class="stat-card"><span>ابزار داخلی</span><b>۱۱</b><small>اعتبارسنجی رایگان</small></div><div class="stat-card"><span>سوابق شما</span><b id="historyStat">۰</b><small>بررسی ثبت‌شده</small></div><div class="stat-card accent"><span>هزینه استفاده</span><b>۰</b><small>بدون خرید اعتبار</small></div></div>
+<div class="dash-grid"><aside class="dash-sidebar"><div class="panel profile-card"><div class="profile-avatar" id="avatar">ا</div><h3 id="name">در حال بارگذاری...</h3><p id="email" class="muted"></p><div class="profile-line"><span>وضعیت حساب</span><b>فعال</b></div><div class="profile-line"><span>خدمات</span><b>رایگان</b></div><div class="profile-line"><span>استعلام رسمی</span><b>لینک مستقیم</b></div></div><div class="panel side-note"><span class="note-icon">✓</span><div><b>یک تفاوت مهم</b><p>استعلام رسمی از پایگاه مرجع انجام می‌شود. ابزارهای داخلی فقط ساختار و اعتبار ریاضی ورودی را بررسی می‌کنند.</p></div></div><div class="panel side-note official-note"><span class="note-icon">↗</span><div><b>سامانه‌های رسمی</b><p>هرجا نتیجه واقعی نیاز به احراز هویت یا دسترسی اختصاصی دارد، دکمه ورود مستقیم به مرجع اصلی را می‌بینید.</p></div></div></aside>
+<section class="dash-main">
+<div class="panel service-hub"><div class="section-title-row"><div><span class="eyebrow">استعلام واقعی</span><h2>سامانه‌های پرکاربرد</h2><p class="muted">این کارت‌ها شما را مستقیم به سامانه مرجع می‌برند.</p></div><span class="official-chip">رسمی</span></div><div class="official-grid" id="officialGrid"></div></div>
+<div class="panel checker-panel"><div class="section-title-row"><div><span class="eyebrow">ابزارهای رایگان</span><h2>اعتبارسنجی داخل امنا یار</h2><p class="muted">نتیجه فوری؛ بدون خرید اعتبار.</p></div><span class="free-chip">رایگان ∞</span></div><div class="checker-grid"><button class="checker-card national-card" onclick="openChecker('national')"><span class="checker-icon">کد</span><span><b>کد ملی</b><small>رقم کنترلی و ساختار</small></span><i>←</i></button><button class="checker-card card-card" onclick="openChecker('card')"><span class="checker-icon">▣</span><span><b>کارت بانکی</b><small>Luhn و بانک</small></span><i>←</i></button><button class="checker-card iban-card" onclick="openChecker('iban')"><span class="checker-icon">IR</span><span><b>شماره شبا</b><small>MOD-97 و بانک</small></span><i>←</i></button></div>
+<div id="checkerBox" class="checker-box hidden"><div class="checker-box-head"><div><span id="checkerIcon" class="checker-icon">کد</span><div><h3 id="checkerTitle">کد ملی</h3><p id="checkerHint">بررسی ساختاری</p></div></div><button class="icon-btn" onclick="closeChecker()">×</button></div><form class="check-form" onsubmit="submitCheck(event)"><label id="inputLabel">کد ملی</label><div class="input-wrap"><input id="checkInput" autocomplete="off" inputmode="numeric"><button type="button" class="clear-input" onclick="clearInput()">پاک کردن</button></div><p id="inputHelp" class="field-help"></p><button class="btn primary xl full" id="submitBtn">بررسی رایگان</button></form><div id="result" class="result-box hidden"></div></div></div>
+<div class="panel extras-panel"><div class="section-title-row"><div><span class="eyebrow">ابزارهای بیشتر</span><h2>اعتبارسنجی‌های ساختاری</h2><p class="muted">این موارد استعلام مالکیت یا سوابق نیستند.</p></div></div><div class="extra-grid" id="extraGrid"></div></div>
+<div class="panel history-panel"><div class="section-title-row"><div><span class="eyebrow">سوابق</span><h2>آخرین بررسی‌های شما</h2></div><span class="history-count" id="historyCount">۰ مورد</span></div><div class="table-wrap"><table class="table"><thead><tr><th>نوع</th><th>نتیجه</th><th>زمان</th></tr></thead><tbody id="history"></tbody></table></div><div id="emptyHistory" class="empty-history hidden"><span>◌</span><b>هنوز بررسی‌ای ثبت نشده</b><p>اولین بررسی را از ابزارهای رایگان شروع کنید.</p></div></div>
+</section></div></main>
 <script>
-const $=s=>document.querySelector(s);
-const labels={national:{title:'کد ملی',icon:'کد',hint:'بررسی ساختار و رقم کنترلی کد ملی',placeholder:'مثلاً ۰۰۱۲۳۴۵۶۷۸',help:'۱۰ رقم؛ اعداد فارسی و انگلیسی پذیرفته می‌شوند.'},card:{title:'شماره کارت بانکی',icon:'▣',hint:'بررسی شماره کارت و شناسایی بانک از روی پیش‌شماره',placeholder:'مثلاً ۶۰۳۷۹۹۱۲۳۴۵۶۷۸۹۰',help:'۱۶ رقم؛ فاصله و خط تیره قابل قبول است.'},iban:{title:'شماره شبا',icon:'IR',hint:'بررسی ساختار شبا و شناسایی بانک',placeholder:'مثلاً IR۶۲۰۱۷۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰',help:'با IR شروع شود و مجموعاً ۲۶ کاراکتر داشته باشد.'}};
-const kindNames={national:'کد ملی',card:'کارت بانکی',iban:'شماره شبا',company:'شناسه ملی شرکت',postal:'کد پستی',mobile:'شماره موبایل',tracking:'رهگیری پستی',vin:'VIN خودرو',plate:'پلاک خودرو',sayadi:'شناسه صیادی',account:'شماره حساب'};
-let currentKind='national';
-async function api(u,o={}){const r=await fetch(u,o);let j={};try{j=await r.json()}catch{};if(!r.ok&&!j.error)j.error='خطای ارتباط با سرور.';return j}
+const $=s=>document.querySelector(s);let currentKind='national';
+const officialServices=[
+{icon:'🛡️',title:'استعلام بیمه خودرو',desc:'اصالت و وضعیت بیمه‌نامه در بیمه مرکزی',tag:'بیمه مرکزی',url:'https://www.centinsur.ir/index.aspx?siteid=1&fkeyid=&siteid=1&pageid=306'},
+{icon:'🏦',title:'استعلام چک صیادی',desc:'وضعیت اعتباری چک در بانک مرکزی',tag:'بانک مرکزی',url:'https://www.cbi.ir/EstelamSayad/24090.aspx'},
+{icon:'📦',title:'رهگیری مرسوله',desc:'آخرین وضعیت بسته در شرکت ملی پست',tag:'پست',url:'https://tracking.post.ir/search.aspx'},
+{icon:'🏛️',title:'دولت هوشمند',desc:'خدمات دولت و احراز هویت رسمی',tag:'دولت من',url:'https://my.gov.ir/'},
+{icon:'👮',title:'خدمات انتظامی',desc:'دسترسی به خدمات الکترونیک پلیس',tag:'پلیس',url:'https://epolice.ir/'},
+{icon:'📍',title:'ثبت نشانی',desc:'خدمات مرتبط با نشانی و اقامت',tag:'ثبت احوال',url:'https://www.ncr.ir/changeAddress'},
+{icon:'✉️',title:'خدمات شرکت پست',desc:'خدمات عمومی و شهروندی پست',tag:'پست ایران',url:'https://post.ir/'},
+{icon:'🇮🇷',title:'درگاه ملی ایران',desc:'دسترسی به خدمات دستگاه‌ها',tag:'ایران',url:'https://iran.gov.ir/'},{icon:'🏠',title:'خدمات کدپستی',desc:'دسترسی به خدمات کدپستی پست',tag:'پست',url:'https://epostcode.post.ir/'},{icon:'🪪',title:'رهگیری مدارک سازمانی',desc:'پیگیری برخی مدارک ارسالی از پست',tag:'پست',url:'https://najatracking.post.ir/'},{icon:'🛡️',title:'نمایندگان بیمه',desc:'بررسی فهرست نمایندگان بیمه',tag:'بیمه مرکزی',url:'https://www.centinsur.ir/index.aspx?siteid=1&fkeyid=&siteid=1&pageid=262'}];
+const labels={national:{title:'کد ملی',icon:'کد',hint:'بررسی ساختار و رقم کنترلی کد ملی',placeholder:'مثلاً ۰۴۹۹۳۷۰۸۹۹',help:'۱۰ رقم؛ اعداد فارسی و انگلیسی پذیرفته می‌شوند.'},card:{title:'شماره کارت بانکی',icon:'▣',hint:'بررسی شماره کارت و شناسایی بانک از پیش‌شماره',placeholder:'مثلاً ۶۰۳۷۹۹۱۲۳۴۵۶۷۸۹۰',help:'۱۶ رقم؛ فاصله و خط تیره قابل قبول است.'},iban:{title:'شماره شبا',icon:'IR',hint:'بررسی ساختار شبا و شناسایی بانک',placeholder:'مثلاً IR۶۲۰۱۷۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰۰',help:'با IR شروع شود و مجموعاً ۲۶ کاراکتر داشته باشد.'}};
+const extras=[['company','شناسه ملی شرکت','۱۱ رقم','🏢'],['postal','کد پستی','۱۰ رقم','📍'],['mobile','شماره موبایل','قالب ایران','📱'],['tracking','کد رهگیری پست','۲۴ رقم','📦'],['vin','VIN خودرو','۱۷ کاراکتر','🚗'],['plate','پلاک خودرو','قالب ایران','🔖'],['sayadi','شناسه صیادی','۱۶ رقم','🏦'],['account','شماره حساب','۸ تا ۱۹ رقم','💳'],['phone','تلفن ثابت','قالب ایران','☎️'],['email','ایمیل','قالب ایمیل','✉️'],['ip','آدرس IP','IPv4','🌐']];
+const kindNames={national:'کد ملی',card:'کارت بانکی',iban:'شماره شبا',company:'شناسه ملی شرکت',postal:'کد پستی',mobile:'شماره موبایل',tracking:'رهگیری پستی',vin:'VIN خودرو',plate:'پلاک خودرو',sayadi:'شناسه صیادی',account:'شماره حساب',phone:'تلفن ثابت',email:'ایمیل',ip:'آدرس IP'};
+function api(u,o={}){return fetch(u,o).then(async r=>{let j={};try{j=await r.json()}catch{};if(!r.ok&&!j.error)j.error='خطای ارتباط با سرور.';return j})}
 function normalize(v){return String(v||'').replace(/[\s-]/g,'').replace(/[۰-۹]/g,d=>String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))}
-function openChecker(kind){currentKind=kind;const x=labels[kind];$('#checkerBox').classList.remove('hidden');$('#checkerIcon').textContent=x.icon;$('#checkerTitle').textContent=x.title;$('#checkerHint').textContent=x.hint;$('#inputLabel').textContent=x.title;$('#checkInput').placeholder=x.placeholder;$('#inputHelp').textContent=x.help;$('#checkInput').value='';$('#result').classList.add('hidden');setTimeout(()=>$('#checkInput').focus(),60);$('#checkerBox').scrollIntoView({behavior:'smooth',block:'center'})}
-function closeChecker(){$('#checkerBox').classList.add('hidden')}
-function clearInput(){$('#checkInput').value='';$('#checkInput').focus()}
-function showResult(ok,title,details=[]){const box=$('#result');box.className='result-box '+(ok?'success':'danger');box.innerHTML=`<div class="result-icon">${ok?'✓':'!'}</div><div><strong>${title}</strong>${details.map(x=>`<p>${x}</p>`).join('')}</div>`;box.classList.remove('hidden');box.scrollIntoView({behavior:'smooth',block:'nearest'})}
-async function submitCheck(e){e.preventDefault();const input=normalize($('#checkInput').value);if(!input)return showResult(false,'ورودی خالی است',['لطفاً مقدار موردنظر را وارد کنید.']);const btn=$('#submitBtn');btn.disabled=true;btn.textContent='در حال بررسی...';const r=await api('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:currentKind,input})});btn.disabled=false;btn.textContent='بررسی رایگان';if(r.error)return showResult(false,r.error);const details=[];if(currentKind==='card')details.push(`بانک: ${r.details?.bankName||'نامشخص'}`);if(currentKind==='iban'){details.push(`بانک: ${r.details?.bankName||'نامشخص'}`);details.push(`کد بانک: ${r.details?.bankCode||'—'}`)}details.push('این نتیجه، اعتبارسنجی ساختاری است و به معنی تأیید مالکیت یا فعال بودن حساب نیست.');showResult(r.valid,r.valid?'ورودی معتبر است':'ورودی نامعتبر است',details);load()}
-function company(v){v=normalize(v);if(!/^\d{11}$/.test(v)||/^([0-9])\1{10}$/.test(v))return false;let sum=0;for(let i=0;i<10;i++)sum+=+v[i]*(11-i);let r=sum%11;return r<2?+v[10]===r:+v[10]===11-r}
-function localCheck(kind){const prompts={company:'شناسه ملی شرکت ۱۱ رقمی',postal:'کد پستی ۱۰ رقمی',mobile:'شماره موبایل ایران',tracking:'کد رهگیری پستی ۲۴ رقمی',vin:'VIN خودرو ۱۷ کاراکتری',plate:'پلاک خودرو',sayadi:'شناسه صیادی ۱۶ رقمی',account:'شماره حساب بانکی'};let v=prompt(prompts[kind]+' را وارد کنید:');if(!v)return;v=normalize(v);let ok=false,detail='';if(kind==='company'){ok=company(v);detail='قالب و رقم کنترلی شناسه ملی بررسی شد.'}if(kind==='postal'){ok=/^\d{10}$/.test(v)&&!/^0+$/.test(v);detail='کد پستی باید ۱۰ رقم باشد.'}if(kind==='mobile'){ok=/^09\d{9}$/.test(v);detail='قالب شماره همراه ایران بررسی شد.'}if(kind==='tracking'){ok=/^\d{24}$/.test(v);detail='کد رهگیری پستی معمولاً ۲۴ رقم است.'}if(kind==='vin'){ok=/^[A-HJ-NPR-Z0-9]{17}$/i.test(v);detail='VIN باید ۱۷ کاراکتر و بدون I/O/Q باشد.'}if(kind==='plate'){ok=/^\d{2}[آ-یA-Za-z]\d{3}\d{2}$/.test(v.replace(/\s/g,''));detail='قالب پلاک به‌صورت ساده بررسی شد.'}if(kind==='sayadi'){ok=/^\d{16}$/.test(v)&&!/^0+$/.test(v);detail='شناسه صیادی باید ۱۶ رقم باشد.'}if(kind==='account'){ok=/^\d{8,19}$/.test(v);detail='طول عددی شماره حساب بررسی شد.'}alert((ok?'✓ معتبر':'✕ نامعتبر')+'\n'+detail+'\n\nتوجه: این ابزار فقط صحت ساختاری را بررسی می‌کند و جای استعلام رسمی مالکیت/سوابق نیست.')}
+function renderOfficial(){const g=$('#officialGrid');g.innerHTML=officialServices.map(s=>`<a class="official-service" href="${s.url}" target="_blank" rel="noopener"><span class="service-icon small">${s.icon}</span><span><b>${s.title}</b><small>${s.desc}</small><em>${s.tag} ↗</em></span></a>`).join('')}
+function renderExtras(){const g=$('#extraGrid');g.innerHTML=extras.map(x=>`<button class="extra-card" onclick="localCheck('${x[0]}')"><span>${x[3]}</span><b>${x[1]}</b><small>${x[2]}</small></button>`).join('')}
+function openChecker(k){currentKind=k;const x=labels[k];$('#checkerBox').classList.remove('hidden');$('#checkerIcon').textContent=x.icon;$('#checkerTitle').textContent=x.title;$('#checkerHint').textContent=x.hint;$('#inputLabel').textContent=x.title;$('#checkInput').placeholder=x.placeholder;$('#inputHelp').textContent=x.help;$('#checkInput').value='';$('#result').classList.add('hidden');setTimeout(()=>$('#checkInput').focus(),60);$('#checkerBox').scrollIntoView({behavior:'smooth',block:'center'})}
+function closeChecker(){$('#checkerBox').classList.add('hidden')} function clearInput(){$('#checkInput').value='';$('#checkInput').focus()}
+function showResult(ok,title,details=[]){const box=$('#result');box.className='result-box '+(ok?'success':'danger');box.innerHTML=`<div class="result-icon">${ok?'✓':'!'}</div><div><strong>${title}</strong>${details.map(x=>`<p>${x}</p>`).join('')}</div>`;box.classList.remove('hidden')}
+async function submitCheck(e){e.preventDefault();const input=normalize($('#checkInput').value);if(!input)return showResult(false,'ورودی خالی است',['لطفاً مقدار موردنظر را وارد کنید.']);const b=$('#submitBtn');b.disabled=true;b.textContent='در حال بررسی...';const r=await api('/api/check',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:currentKind,input})});b.disabled=false;b.textContent='بررسی رایگان';if(r.error)return showResult(false,r.error);const d=[];if(currentKind==='card')d.push(`بانک: ${r.details?.bankName||'نامشخص'}`);if(currentKind==='iban')d.push(`بانک: ${r.details?.bankName||'نامشخص'}`,`کد بانک: ${r.details?.bankCode||'—'}`);d.push(r.note||'این نتیجه اعتبارسنجی ساختاری است.');showResult(r.valid,r.valid?'ورودی معتبر است':'ورودی نامعتبر است',d);load()}
+function localCheck(kind){const map={company:['شناسه ملی شرکت ۱۱ رقمی','۱۱ رقم'],postal:['کد پستی','۱۰ رقم'],mobile:['شماره موبایل ایران','مثلاً ۰۹۱۲۱۲۳۴۵۶۷'],tracking:['کد رهگیری پستی','کد ۲۴ رقمی'],vin:['VIN خودرو','۱۷ کاراکتر'],plate:['پلاک خودرو','مثلاً ۱۲۳الف۴۵'],sayadi:['شناسه صیادی','۱۶ رقم'],account:['شماره حساب بانکی','۸ تا ۱۹ رقم'],phone:['تلفن ثابت','مثلاً ۰۲۱۱۲۳۴۵۶۷۸'],email:['ایمیل','مثلاً name@example.com'],ip:['آدرس IPv4','مثلاً 8.8.8.8']};const [title,ph]=map[kind];const v=prompt(title+' را وارد کنید:\n'+ph);if(v===null)return;const input=normalize(v);const r=validateLocal(kind,input);showResult(r.ok,r.ok?'ورودی معتبر است':'ورودی نامعتبر است',[r.detail,'این ابزار فقط اعتبارسنجی ساختاری است و جای استعلام رسمی نیست.']);$('#checkerBox').classList.remove('hidden');$('#checkerTitle').textContent=title;$('#checkerHint').textContent='اعتبارسنجی ساختاری';$('#inputLabel').textContent=title;$('#checkInput').value=v;$('#result').classList.remove('hidden');}
+function validateLocal(k,v){if(k==='company')return {ok:/^\d{11}$/.test(v)&&!/^([0-9])\1{10}$/.test(v),detail:'قالب ۱۱ رقمی شناسه ملی بررسی شد.'};if(k==='postal')return {ok:/^\d{10}$/.test(v)&&!/^0+$/.test(v),detail:'کد پستی باید ۱۰ رقم باشد.'};if(k==='mobile')return {ok:/^09\d{9}$/.test(v),detail:'قالب شماره همراه ایران بررسی شد.'};if(k==='tracking')return {ok:/^\d{24}$/.test(v),detail:'کد رهگیری ۲۴ رقمی بررسی شد.'};if(k==='vin')return {ok:/^[A-HJ-NPR-Z0-9]{17}$/i.test(v),detail:'VIN باید ۱۷ کاراکتر و بدون I/O/Q باشد.'};if(k==='plate')return {ok:/^\d{2}[آ-یA-Za-z]\d{3}\d{2}$/.test(v.replace(/\s/g,'')),detail:'قالب ساده پلاک ایران بررسی شد.'};if(k==='sayadi')return {ok:/^\d{16}$/.test(v)&&!/^0+$/.test(v),detail:'شناسه صیادی باید ۱۶ رقم باشد.'};if(k==='account')return {ok:/^\d{8,19}$/.test(v),detail:'طول عددی شماره حساب بررسی شد.'};if(k==='phone')return {ok:/^0\d{9,10}$/.test(v),detail:'قالب عددی تلفن ایران بررسی شد.'};if(k==='email')return {ok:/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v),detail:'قالب ایمیل بررسی شد.'};if(k==='ip')return {ok:/^(25[0-5]|2[0-4]\d|1?\d?\d)(\.(25[0-5]|2[0-4]\d|1?\d?\d)){3}$/.test(v),detail:'قالب IPv4 بررسی شد.'};return {ok:false,detail:'نوع ابزار ناشناخته است.'}}
 function historyLabel(k){return kindNames[k]||k}
-async function load(){const r=await api('/api/dashboard');if(r.error)return location.href='/';$('#name').textContent=r.user.username;$('#welcomeName').textContent=r.user.username;$('#email').textContent=r.user.email;$('#topUsername').textContent=r.user.username;$('#avatar').textContent=(r.user.username||'ا').slice(0,1).toUpperCase();const rows=r.checks||[];$('#historyCount').textContent=rows.length+' مورد';$('#history').innerHTML=rows.map(x=>`<tr><td><span class="history-kind">${historyLabel(x.kind)}</span></td><td><span class="status ${x.result==='معتبر'?'ok':'bad'}">${x.result}</span></td><td>${new Date(x.created_at).toLocaleString('fa-IR',{dateStyle:'short',timeStyle:'short'})}</td></tr>`).join('');$('#emptyHistory').classList.toggle('hidden',rows.length>0);const k=new URLSearchParams(location.search).get('check');if(k&&labels[k]){history.replaceState({},'',location.pathname);openChecker(k)}}
+async function load(){const r=await api('/api/dashboard');if(r.error)return location.href='/';$('#name').textContent=r.user.username;$('#welcomeName').textContent=r.user.username;$('#email').textContent=r.user.email;$('#topUsername').textContent=r.user.username;$('#avatar').textContent=(r.user.username||'ا').slice(0,1).toUpperCase();const rows=r.checks||[];$('#historyCount').textContent=rows.length+' مورد';$('#historyStat').textContent=rows.length;$('#history').innerHTML=rows.map(x=>`<tr><td><span class="history-kind">${historyLabel(x.kind)}</span></td><td><span class="status ${x.result==='معتبر'?'ok':'bad'}">${x.result}</span></td><td>${new Date(x.created_at).toLocaleString('fa-IR',{dateStyle:'short',timeStyle:'short'})}</td></tr>`).join('');$('#emptyHistory').classList.toggle('hidden',rows.length>0);const k=new URLSearchParams(location.search).get('check');if(k&&labels[k]){history.replaceState({},'',location.pathname);openChecker(k)}}
 async function logout(){await api('/api/auth/logout',{method:'POST'});location.href='/'}
-load();
-</script>
-</body>
-</html>
+renderOfficial();renderExtras();load();
+</script></body></html>

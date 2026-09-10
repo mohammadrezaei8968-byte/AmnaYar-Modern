@@ -47,11 +47,8 @@ app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html']
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
 const imageLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
-const plans = {
-  free: { name: 'رایگان', amount: 0, days: 30, messagesPerDay: 200, imagesPerDay: 30, model: 'gpt-5.6-luna' },
-  pro: { name: 'Pro', amount: 249000, days: 30, messagesPerDay: 500, imagesPerDay: 60, model: 'gpt-5.6-terra' },
-  business: { name: 'Business', amount: 699000, days: 30, messagesPerDay: 5000, imagesPerDay: 200, model: 'gpt-5.6-sol' },
-};
+const DEFAULT_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
+
 const q = (text, params = []) => pool.query(text, params);
 const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
 const normalizeUsername = (v) => String(v || '').trim().toLowerCase();
@@ -115,17 +112,7 @@ async function init() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
 
-  // Kept for compatibility with old test data. New public pages no longer create or sell credit orders.
-  await q(`CREATE TABLE IF NOT EXISTS credit_orders(
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    package_name TEXT NOT NULL,
-    credits INTEGER NOT NULL,
-    amount BIGINT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected')),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    approved_at TIMESTAMPTZ
-  )`);
+
 
   await q(`CREATE TABLE IF NOT EXISTS checks(
     id BIGSERIAL PRIMARY KEY,
@@ -136,37 +123,6 @@ async function init() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
 
-  await q(`CREATE TABLE IF NOT EXISTS subscriptions(
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    plan TEXT NOT NULL CHECK (plan IN ('free','pro','business')),
-    status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','pending','expired','cancelled')),
-    amount_toman BIGINT NOT NULL DEFAULT 0,
-    starts_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    ends_at TIMESTAMPTZ NOT NULL,
-    authority TEXT,
-    ref_id TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
-  await q(`CREATE TABLE IF NOT EXISTS payment_orders(
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    plan TEXT NOT NULL,
-    amount_toman BIGINT NOT NULL,
-    authority TEXT UNIQUE,
-    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','paid','failed','cancelled')),
-    ref_id TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    paid_at TIMESTAMPTZ
-  )`);
-  await q(`CREATE TABLE IF NOT EXISTS ai_usage(
-    id BIGSERIAL PRIMARY KEY,
-    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    usage_date DATE NOT NULL DEFAULT CURRENT_DATE,
-    kind TEXT NOT NULL CHECK (kind IN ('message','image')),
-    count INTEGER NOT NULL DEFAULT 0,
-    UNIQUE(user_id, usage_date, kind)
-  )`);
 
   if (process.env.OWNER_EMAIL && process.env.OWNER_PASSWORD) {
     const email = normalizeEmail(process.env.OWNER_EMAIL);
@@ -221,27 +177,10 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
   }
 });
 app.post('/api/auth/logout', (req, res) => { res.clearCookie('amnayar_session'); res.json({ ok: true }); });
-async function getPlan(userId) {
-  const r = await q(`SELECT plan,status,starts_at,ends_at,amount_toman FROM subscriptions WHERE user_id=$1 AND status='active' AND ends_at>NOW() ORDER BY ends_at DESC LIMIT 1`, [userId]);
-  return r.rowCount ? { key: r.rows[0].plan, ...plans[r.rows[0].plan], ...r.rows[0] } : { key: 'free', ...plans.free, status: 'active' };
-}
-async function getUsage(userId, kind) {
-  const r = await q(`SELECT count FROM ai_usage WHERE user_id=$1 AND usage_date=CURRENT_DATE AND kind=$2`, [userId, kind]);
-  return r.rowCount ? r.rows[0].count : 0;
-}
-async function canUseUsage(userId, kind, limit) {
-  return (await getUsage(userId, kind)) < limit;
-}
-async function recordUsage(userId, kind) {
-  await q(`INSERT INTO ai_usage(user_id,usage_date,kind,count) VALUES($1,CURRENT_DATE,$2,1)
-    ON CONFLICT(user_id,usage_date,kind) DO UPDATE SET count=ai_usage.count+1`, [userId, kind]);
-}
 app.get('/api/me', auth, async (req, res) => {
   const r = await q('SELECT id,email,username,role,created_at FROM users WHERE id=$1', [req.user.id]);
   if (!r.rowCount) return res.status(401).json({ error: 'کاربر پیدا نشد.' });
-  const plan = await getPlan(req.user.id);
-  const [messages, images] = await Promise.all([getUsage(req.user.id,'message'), getUsage(req.user.id,'image')]);
-  res.json({ user: r.rows[0], plan: { key: plan.key, name: plan.name, amount: plan.amount, ends_at: plan.ends_at || null, messagesUsed: messages, messagesLimit: plan.messagesPerDay, imagesUsed: images, imagesLimit: plan.imagesPerDay } });
+  res.json({ user: r.rows[0] });
 });
 
 // Free, unlimited structural checks. No credit balance and no purchase flow are involved.
@@ -272,54 +211,95 @@ function iban(s) {
   return rem === 1;
 }
 
-app.get('/api/plans', (req,res)=>res.json({plans:Object.entries(plans).map(([key,p])=>({key,...p}))}));
-app.get('/api/billing/status', auth, async (req,res)=>{
-  const plan=await getPlan(req.user.id);
-  const [messages,images]=await Promise.all([getUsage(req.user.id,'message'),getUsage(req.user.id,'image')]);
-  const orders=(await q(`SELECT id,plan,amount_toman,status,ref_id,created_at,paid_at FROM payment_orders WHERE user_id=$1 ORDER BY id DESC LIMIT 10`,[req.user.id])).rows;
-  res.json({plan:{key:plan.key,name:plan.name,amount:plan.amount,ends_at:plan.ends_at||null,messagesLimit:plan.messagesPerDay,imagesLimit:plan.imagesPerDay,messagesUsed:messages,imagesUsed:images},orders});
-});
-app.post('/api/billing/create-payment', auth, async (req,res)=>{
-  const planKey=String(req.body?.plan||'');
-  const plan=plans[planKey];
-  if(!plan || planKey==='free') return res.status(400).json({error:'طرح اشتراکی نامعتبر است.'});
-  if(!process.env.ZARINPAL_MERCHANT_ID) return res.status(503).json({error:'درگاه پرداخت هنوز در Render تنظیم نشده است. بعد از ثبت Merchant ID، پرداخت فعال می‌شود.'});
-  try{
-    const order=(await q(`INSERT INTO payment_orders(user_id,plan,amount_toman) VALUES($1,$2,$3) RETURNING id`,[req.user.id,planKey,plan.amount])).rows[0];
-    const callback=`${process.env.APP_URL||'https://amnayar-modern.onrender.com'}/api/billing/zarinpal/callback?order=${order.id}`;
-    const amountRial=plan.amount*10;
-    const response=await fetch('https://api.zarinpal.com/pg/v4/payment/request.json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({merchant_id:process.env.ZARINPAL_MERCHANT_ID,amount:amountRial,callback_url:callback,description:`اشتراک ${plan.name} امنا یار - سفارش ${order.id}`})});
-    const data=await response.json();
-    if(data?.data?.code!==100) throw new Error(data?.errors?.message||'ZARINPAL_REQUEST_FAILED');
-    await q('UPDATE payment_orders SET authority=$1 WHERE id=$2',[data.data.authority,order.id]);
-    res.json({ok:true,paymentUrl:`https://www.zarinpal.com/pg/StartPay/${data.data.authority}`});
-  }catch(e){console.error('Payment request error',e);res.status(502).json({error:'ساخت پرداخت ناموفق بود. تنظیمات درگاه را بررسی کنید.'});}
-});
-app.get('/api/billing/zarinpal/callback', async (req,res)=>{
-  const orderId=Number(req.query.order||0); const authority=String(req.query.Authority||''); const status=String(req.query.Status||'');
-  if(!orderId||!authority) return res.redirect('/pricing.html?payment=failed');
-  try{
-    const r=await q('SELECT * FROM payment_orders WHERE id=$1 AND authority=$2',[orderId,authority]);
-    if(!r.rowCount) return res.redirect('/pricing.html?payment=failed');
-    const order=r.rows[0];
-    if(order.status==='paid') return res.redirect('/pricing.html?payment=success&ref='+encodeURIComponent(order.ref_id||''));
-    if(status!=='OK') { await q("UPDATE payment_orders SET status='cancelled' WHERE id=$1",[order.id]); return res.redirect('/pricing.html?payment=cancelled'); }
-    const plan=plans[order.plan];
-    const verify=await fetch('https://api.zarinpal.com/pg/v4/payment/verify.json',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({merchant_id:process.env.ZARINPAL_MERCHANT_ID,amount:order.amount_toman*10,authority})});
-    const data=await verify.json();
-    if(![100,101].includes(data?.data?.code)) { await q("UPDATE payment_orders SET status='failed' WHERE id=$1",[order.id]); return res.redirect('/pricing.html?payment=failed'); }
-    const refId=String(data.data.ref_id||'');
-    await q("UPDATE payment_orders SET status='paid',ref_id=$1,paid_at=NOW() WHERE id=$2",[refId,order.id]);
-    await q("UPDATE subscriptions SET status='expired' WHERE user_id=$1 AND status='active'",[order.user_id]);
-    await q(`INSERT INTO subscriptions(user_id,plan,status,amount_toman,starts_at,ends_at,authority,ref_id) VALUES($1,$2,'active',$3,NOW(),NOW()+INTERVAL '30 days',$4,$5)`,[order.user_id,order.plan,order.amount_toman,authority,refId]);
-    res.redirect(`/pricing.html?payment=success&ref=${encodeURIComponent(refId)}`);
-  }catch(e){console.error('Payment callback error',e);res.redirect('/pricing.html?payment=failed');}
-});
+const iranBankCodes = {
+  '010': 'بانک مرکزی',
+  '011': 'بانک صنعت و معدن',
+  '012': 'بانک ملت',
+  '013': 'بانک رفاه کارگران',
+  '014': 'بانک مسکن',
+  '015': 'بانک سپه',
+  '016': 'بانک کشاورزی',
+  '017': 'بانک ملی ایران',
+  '018': 'بانک تجارت',
+  '019': 'بانک صادرات ایران',
+  '020': 'بانک توسعه صادرات',
+  '021': 'پست بانک ایران',
+  '022': 'بانک توسعه تعاون',
+  '051': 'بانک توسعه سرمایه',
+  '053': 'بانک کارآفرین',
+  '054': 'بانک پارسیان',
+  '055': 'بانک اقتصاد نوین',
+  '056': 'بانک سامان',
+  '057': 'بانک پاسارگاد',
+  '058': 'بانک سرمایه',
+  '059': 'بانک سینا',
+  '060': 'بانک شهر',
+  '061': 'بانک دی',
+  '062': 'بانک آینده',
+  '063': 'بانک انصار',
+  '064': 'بانک گردشگری',
+  '065': 'بانک حکمت ایرانیان',
+  '066': 'بانک ملل',
+  '069': 'بانک ایران زمین',
+  '070': 'بانک رسالت',
+  '073': 'بانک کوثر',
+  '075': 'بانک مهر ایران',
+  '078': 'بانک خاورمیانه',
+  '080': 'بانک نور',
+  '090': 'بانک مهر اقتصاد',
+  '095': 'بانک ایران و ونزوئلا'
+};
+
+const iranCardBanks = {
+  '603799': 'بانک ملی ایران',
+  '589210': 'بانک سپه',
+  '627648': 'بانک توسعه صادرات ایران',
+  '627961': 'بانک صنعت و معدن',
+  '603770': 'بانک کشاورزی',
+  '628023': 'بانک مسکن',
+  '627760': 'پست بانک ایران',
+  '502229': 'بانک پاسارگاد',
+  '639347': 'بانک پاسارگاد',
+  '627353': 'بانک تجارت',
+  '585983': 'بانک تجارت',
+  '603769': 'بانک صادرات ایران',
+  '610433': 'بانک ملت',
+  '627412': 'بانک اقتصاد نوین',
+  '622106': 'بانک پارسیان',
+  '639194': 'بانک پارسیان',
+  '621986': 'بانک سامان',
+  '639346': 'بانک سینا',
+  '502938': 'بانک دی',
+  '504172': 'بانک رسالت',
+  '505416': 'بانک گردشگری',
+  '505785': 'بانک ایران زمین',
+  '502908': 'بانک توسعه تعاون',
+  '639607': 'بانک سرمایه',
+  '639217': 'بانک کشاورزی',
+  '589463': 'بانک رفاه کارگران',
+  '639599': 'بانک قوامین',
+  '606373': 'بانک مهر ایران'
+};
+
+function cardBank(input) {
+  return iranCardBanks[input.slice(0, 6)] || 'بانک از روی پیش‌شماره شناسایی نشد';
+}
+
+function ibanDetails(input) {
+  const normalized = input.replace(/\s/g, '').toUpperCase();
+  const bankCode = normalized.slice(4, 7);
+  return {
+    bankCode,
+    bankName: iranBankCodes[bankCode] || 'بانک از روی کد شبا شناسایی نشد',
+    accountNumber: normalized.slice(7)
+  };
+}
 
 app.post('/api/check', auth, async (req, res) => {
   try {
     const kind = String(req.body.kind || '');
     const input = String(req.body.input || '').replace(/\s/g, '');
+    const city = String(req.body.city || '').trim();
     const rules = {
       card: () => /^\d{16}$/.test(input) && luhn(input),
       national: () => iranNational(input),
@@ -329,7 +309,11 @@ app.post('/api/check', auth, async (req, res) => {
     const valid = rules[kind]();
     const result = valid ? 'معتبر' : 'نامعتبر';
     await q('INSERT INTO checks(user_id,kind,input_hash,result) VALUES($1,$2,$3,$4)', [req.user.id, kind, sha256(input), result]);
-    res.json({ valid, result });
+    const details = {};
+    if (kind === 'national') details.issuingCity = city || 'ثبت نشده';
+    if (kind === 'card') details.bankName = valid ? cardBank(input) : 'قابل شناسایی نیست (شماره کارت نامعتبر است)';
+    if (kind === 'iban') Object.assign(details, valid ? ibanDetails(input) : { bankCode: '—', bankName: 'قابل شناسایی نیست (شماره شبا نامعتبر است)', accountNumber: '—' });
+    res.json({ valid, result, details });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'خطای ثبت استعلام.' });
@@ -453,8 +437,6 @@ async function writeArtifact(kind, answer, userText) {
 
 app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'هوش مصنوعی هنوز فعال نشده است. کلید OPENAI_API_KEY باید در Render تنظیم شود.' });
-  const plan = await getPlan(req.user.id);
-  if (!(await canUseUsage(req.user.id, 'message', plan.messagesPerDay))) return res.status(429).json({ error: `سهم روزانه طرح ${plan.name} شما تمام شده است. برای ادامه، طرح Pro یا Business را فعال کنید.`, code:'PLAN_LIMIT', plan:plan.key });
   const conversationId = Number(req.body.conversationId);
   const message = String(req.body.message || '').trim();
   const imageDataUrl = typeof req.body.imageDataUrl === 'string' ? req.body.imageDataUrl : '';
@@ -511,12 +493,10 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
     return res.status(400).json({ error: 'آپلود یا پردازش فایل انجام نشد. حجم یا نوع فایل را بررسی کنید.' });
   }
 
-  const wantsImageRequest = detectImageRequest(message);
-  if (wantsImageRequest && !(await canUseUsage(req.user.id, 'image', plan.imagesPerDay))) return res.status(429).json({ error: `سهم روزانه ساخت تصویر در طرح ${plan.name} شما تمام شده است.`, code:'PLAN_LIMIT', plan:plan.key });
 
   try {
     const request = {
-      model: plan.model || process.env.OPENAI_MODEL || 'gpt-5.6-luna',
+      model: DEFAULT_AI_MODEL,
       instructions: 'تو AmnaYar AI، دستیار حرفه‌ای و دقیق امنا یار هستی. پاسخ‌ها را فارسی روان، روشن، کاربردی و ساختاریافته بده. هرگز اطلاعات، منبع، عدد، نام، قابلیت یا نتیجه‌ای را حدس نزن و جعل نکن؛ اگر مطمئن نیستی صریح بگو که مطمئن نیستی. برای درخواست فایل، محتوای مناسب همان قالب را آماده کن؛ برای Excel/CSV در صورت امکان جدول Markdown منظم بده و برای کدنویسی کد را داخل code block کامل و قابل اجرا قرار بده. برای اطلاعات روز، خبر، قیمت، قوانین، مشخصات محصولات و هر موضوعی که ممکن است تغییر کرده باشد از جست‌وجوی وب استفاده کن و نتیجه را با منبع قابل‌اعتماد پشتیبانی کن. برای مسائل پزشکی، حقوقی و مالی پرریسک با احتیاط و بدون ادعای قطعیت پاسخ بده. اطلاعات محرمانه مثل رمز، کلید API و اطلاعات بانکی حساس را درخواست نکن. اگر کاربر درخواست ساخت تصویر، فایل یا پروژه کرد، تا حد امکان خودِ خروجی را بساز و لینک آن را ارائه کن؛ فقط توضیح دادن درباره اینکه چگونه ساخته شود کافی نیست.',
       tools: [{ type: 'web_search' }],
       input: [{ role: 'user', content }],
@@ -549,7 +529,6 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
         });
         const item=imageResult?.data?.[0];
         if (item?.b64_json) {
-          await recordUsage(req.user.id, 'image');
           attachments.push({type:'image',name:'تصویر ساخته‌شده توسط AmnaYar AI',dataUrl:`data:image/png;base64,${item.b64_json}`});
         }
       } catch(imageError) {
@@ -564,7 +543,6 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
     }
     await q('INSERT INTO messages(conversation_id,user_id,role,content) VALUES($1,$2,\'user\',$3),($1,$2,\'assistant\',$4)', [conversationId, req.user.id, text, answer]);
     await q('UPDATE conversations SET previous_response_id=$1,updated_at=NOW(),title=CASE WHEN title=\'گفت‌وگوی جدید\' THEN LEFT($2,80) ELSE title END WHERE id=$3 AND user_id=$4', [response.id, text, conversationId, req.user.id]);
-    await recordUsage(req.user.id, 'message');
     for (const fileId of uploadedForCleanup) {
       try { await openai.files.delete(fileId); } catch {}
     }
@@ -581,8 +559,6 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
 
 app.post('/api/generate-image', auth, imageLimiter, async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'هوش مصنوعی هنوز فعال نشده است. کلید OPENAI_API_KEY باید در Render تنظیم شود.' });
-  const plan = await getPlan(req.user.id);
-  if (!(await canUseUsage(req.user.id, 'image', plan.imagesPerDay))) return res.status(429).json({ error: `سهم روزانه ساخت تصویر در طرح ${plan.name} شما تمام شده است. برای ادامه، Pro یا Business را فعال کنید.`, code:'PLAN_LIMIT', plan:plan.key });
   const prompt = String(req.body?.prompt || '').trim();
   if (!prompt) return res.status(400).json({ error: 'توضیح تصویر را وارد کنید.' });
   if (prompt.length > 4000) return res.status(400).json({ error: 'توضیح تصویر بیش از حد طولانی است.' });
@@ -596,7 +572,6 @@ app.post('/api/generate-image', auth, imageLimiter, async (req, res) => {
     });
     const item = result?.data?.[0];
     if (!item?.b64_json) throw new Error('IMAGE_DATA_MISSING');
-    await recordUsage(req.user.id, 'image');
     res.json({ image: `data:image/png;base64,${item.b64_json}`, model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
   } catch (e) {
     console.error('Image generation error', e);
@@ -606,27 +581,21 @@ app.post('/api/generate-image', auth, imageLimiter, async (req, res) => {
 });
 
 app.get('/api/owner/stats', auth, owner, async (req, res) => {
-  const [users, checks, messages, revenue, activeSubscriptions] = await Promise.all([
+  const [users, checks, messages] = await Promise.all([
     q("SELECT COUNT(*)::int count FROM users WHERE role='user'"),
     q('SELECT COUNT(*)::int count FROM checks'),
     q('SELECT COUNT(*)::int count FROM messages'),
-    q("SELECT COALESCE(SUM(amount_toman),0)::bigint total FROM payment_orders WHERE status='paid'"),
-    q("SELECT COUNT(*)::int count FROM subscriptions WHERE status='active' AND ends_at>NOW()"),
   ]);
-  res.json({ users: users.rows[0].count, checks: checks.rows[0].count, messages: messages.rows[0].count, revenue: Number(revenue.rows[0].total), activeSubscriptions: activeSubscriptions.rows[0].count });
+  res.json({ users: users.rows[0].count, checks: checks.rows[0].count, messages: messages.rows[0].count });
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;
   const checks = (await q('SELECT c.id,u.email,u.username,c.kind,c.result,c.created_at FROM checks c JOIN users u ON u.id=c.user_id ORDER BY c.id DESC')).rows;
   const messages = (await q('SELECT m.id,u.email,u.username,m.role,m.content,m.created_at FROM messages m JOIN users u ON u.id=m.user_id ORDER BY m.id DESC LIMIT 5000')).rows;
-  const payments = (await q('SELECT p.id,u.email,u.username,p.plan,p.amount_toman,p.status,p.ref_id,p.created_at,p.paid_at FROM payment_orders p JOIN users u ON u.id=p.user_id ORDER BY p.id DESC')).rows;
-  const subscriptions = (await q('SELECT s.id,u.email,u.username,s.plan,s.status,s.amount_toman,s.starts_at,s.ends_at,s.ref_id FROM subscriptions s JOIN users u ON u.id=s.user_id ORDER BY s.id DESC')).rows;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users), 'Users');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(checks), 'Checks');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(messages), 'Messages');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(payments), 'Payments');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(subscriptions), 'Subscriptions');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="amnayar-report.xlsx"');
@@ -636,7 +605,7 @@ app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, '../public/dashboard.html')));
 app.get('/ai', (req, res) => res.sendFile(path.join(__dirname, '../public/ai.html')));
 app.get('/owner', (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
-app.get('/pricing', (req, res) => res.sendFile(path.join(__dirname, '../public/pricing.html')));
+app.get('/pricing', (req, res) => res.redirect('/#features'));
 app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 init().then(() => app.listen(PORT, () => console.log(`AmnaYar running on ${PORT}`))).catch(e => { console.error(e); process.exit(1); });

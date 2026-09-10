@@ -8,3 +8,4 @@ async function login(e){e.preventDefault();const r=await api('/api/auth/login','
 async function api(url,method='GET',body){const r=await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return r.json()}
 async function startCheck(kind){const me=await api('/api/me');if(me.error){openAuth('login');return}location.href='/dashboard.html?check='+encodeURIComponent(kind)}
 async function openAI(){const me=await api('/api/me');if(me.error){openAuth('login');return}location.href='/ai.html'}
+function openPricing(){location.href='/pricing.html'}

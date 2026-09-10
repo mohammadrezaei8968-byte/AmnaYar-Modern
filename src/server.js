@@ -270,20 +270,34 @@ app.post('/api/chat', auth, aiLimiter, async (req, res) => {
   }
 
   try {
-    const response = await openai.responses.create({
+    const request = {
       model: process.env.OPENAI_MODEL || 'gpt-5.6-sol',
       instructions: 'تو AmnaYar AI، دستیار حرفه‌ای و دقیق امنا یار هستی. پاسخ‌ها را فارسی روان، روشن، کاربردی و ساختاریافته بده. هرگز اطلاعات، منبع، عدد، نام، قابلیت یا نتیجه‌ای را حدس نزن و جعل نکن؛ اگر مطمئن نیستی صریح بگو که مطمئن نیستی. برای اطلاعات روز، خبر، قیمت، قوانین، مشخصات محصولات و هر موضوعی که ممکن است تغییر کرده باشد از جست‌وجوی وب استفاده کن و نتیجه را با منبع قابل‌اعتماد پشتیبانی کن. برای مسائل پزشکی، حقوقی و مالی پرریسک با احتیاط و بدون ادعای قطعیت پاسخ بده. اطلاعات محرمانه مثل رمز، کلید API و اطلاعات بانکی حساس را درخواست نکن. وقتی کاربر درخواست تصویر دارد، توضیح متنیِ ساخت تصویر را جایگزین تولید تصویر نکن؛ تولید تصویر در قابلیت جداگانه AmnaYar انجام می‌شود.',
       tools: [{ type: 'web_search' }],
       input: [{ role: 'user', content }],
-      previous_response_id: conv.rows[0].previous_response_id || undefined,
-    });
+    };
+    if (conv.rows[0].previous_response_id) request.previous_response_id = conv.rows[0].previous_response_id;
+
+    let response;
+    try {
+      response = await openai.responses.create(request);
+    } catch (firstError) {
+      // If the conversation was created with a different model/version, the old
+      // previous_response_id can be incompatible. Retry once as a fresh response
+      // so upgrading the AI never breaks an existing conversation.
+      const msg = String(firstError?.message || '').toLowerCase();
+      const incompatible = /previous_response|response.*not found|not found.*response|cannot.*continue|incompatible/.test(msg);
+      if (!incompatible || !request.previous_response_id) throw firstError;
+      delete request.previous_response_id;
+      response = await openai.responses.create(request);
+    }
     const answer = response.output_text?.trim() || 'پاسخی دریافت نشد.';
     await q('INSERT INTO messages(conversation_id,user_id,role,content) VALUES($1,$2,\'user\',$3),($1,$2,\'assistant\',$4)', [conversationId, req.user.id, text, answer]);
     await q('UPDATE conversations SET previous_response_id=$1,updated_at=NOW(),title=CASE WHEN title=\'گفت‌وگوی جدید\' THEN LEFT($2,80) ELSE title END WHERE id=$3 AND user_id=$4', [response.id, text, conversationId, req.user.id]);
     res.json({ answer, responseId: response.id });
   } catch (e) {
     console.error('AI error', e);
-    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
+    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه پاسخ‌گویی نمی‌دهد.' : e?.status === 400 ? 'درخواست به موتور هوش مصنوعی نامعتبر بود. تنظیمات مدل را بررسی می‌کنیم.' : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
     res.status(502).json({ error: detail });
   }
 });

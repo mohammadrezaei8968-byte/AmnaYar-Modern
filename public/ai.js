@@ -24,21 +24,30 @@ function useSuggestion(t){$('#messageInput').value=t;$('#messageInput').focus();
 async function fileToDataUrl(file){return await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=reject;r.readAsDataURL(file);});}
 let localEngine=null;
 let localEnginePromise=null;
-const LOCAL_MODEL='Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
-const WEBLLM_CDN='https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.84/+esm';
+const LOCAL_MODEL='onnx-community/Qwen2.5-0.5B-Instruct';
+const TRANSFORMERS_CDN='https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1/+esm';
 
 async function loadLocalEngine(){
   if(localEngine)return localEngine;
   if(localEnginePromise)return localEnginePromise;
   localEnginePromise=(async()=>{
-    if(!navigator.gpu) throw new Error('مرورگر شما WebGPU را پشتیبانی نمی‌کند. برای هوش مصنوعی رایگان امنا یار از آخرین Chrome یا Edge استفاده کنید.');
-    $('#status').textContent='در حال آماده‌سازی هوش مصنوعی رایگان…';
-    const webllm=await import(WEBLLM_CDN);
-    localEngine=await webllm.CreateMLCEngine(LOCAL_MODEL,{initProgressCallback:(p)=>{
-      const pct=Math.max(0,Math.min(100,Math.round((p.progress||0)*100)));
-      $('#status').textContent=`در حال آماده‌سازی هوش مصنوعی روی دستگاه شما… ${pct}%`;
-    }});
-    $('#status').textContent='آماده • رایگان و روی دستگاه شما';
+    const hasWebGPU=!!navigator.gpu;
+    $('#status').textContent=hasWebGPU
+      ? 'در حال آماده‌سازی هوش مصنوعی رایگان…'
+      : 'GPU پیدا نشد؛ نسخه CPU رایگان در حال آماده‌سازی است…';
+    const transformers=await import(TRANSFORMERS_CDN);
+    const device=hasWebGPU?'webgpu':'wasm';
+    localEngine=await transformers.pipeline('text-generation',LOCAL_MODEL,{
+      device,
+      dtype:'q4',
+      progress_callback:(p)=>{
+        const loaded=Number(p?.loaded||0),total=Number(p?.total||0);
+        const pct=total>0?Math.max(0,Math.min(100,Math.round(loaded/total*100))):null;
+        if(pct!==null) $('#status').textContent=`در حال آماده‌سازی هوش مصنوعی ${device==='wasm'?'روی CPU':'روی GPU'}… ${pct}%`;
+        else if(p?.status==='progress'&&typeof p.progress==='number') $('#status').textContent=`در حال آماده‌سازی هوش مصنوعی… ${Math.round(p.progress)}%`;
+      }
+    });
+    $('#status').textContent=device==='wasm'?'آماده • رایگان • اجرای CPU روی دستگاه شما':'آماده • رایگان • اجرای GPU روی دستگاه شما';
     return localEngine;
   })().catch(e=>{localEnginePromise=null;throw e;});
   return localEnginePromise;
@@ -86,8 +95,9 @@ async function sendMessage(e){
       ...history.filter(x=>x.role!=='assistant' || x.content!=='در حال آماده‌سازی هوش مصنوعی روی دستگاه شما…').slice(-10),
       {role:'user',content:prompt}
     ];
-    const response=await engine.chat.completions.create({messages,temperature:0.7,max_tokens:700});
-    const answer=response.choices?.[0]?.message?.content?.trim()||'پاسخی تولید نشد.';
+    const output=await engine(messages,{max_new_tokens:420,temperature:0.7,do_sample:true});
+    const generated=output?.[0]?.generated_text;
+    const answer=(Array.isArray(generated)?generated.at(-1)?.content:generated)?.trim()||'پاسخی تولید نشد.';
     $('#typing')?.remove();
     addMessage('assistant',answer);
     await saveLocalChat(text||`پیوست ${filesForSend.length} فایل`,answer);
@@ -97,7 +107,7 @@ async function sendMessage(e){
     console.error(err);
     addMessage('assistant','⚠️ '+(err?.message||'اجرای هوش مصنوعی انجام نشد.'));
   }finally{
-    $('#status').textContent=localEngine?'آماده • رایگان و روی دستگاه شما':'آماده';
+    $('#status').textContent=localEngine?'آماده • رایگان • روی دستگاه شما':'آماده';
     clearImage();selectedFiles=[];renderFilePreview();
   }
 }

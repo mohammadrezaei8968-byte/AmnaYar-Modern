@@ -10,20 +10,12 @@ services:
       - key: JWT_SECRET
         sync: false
       - key: APP_URL
-        value: https://amnayar.ir
-      - key: SMTP_HOST
+        value: https://amnayar-modern.onrender.com
+      - key: OPENAI_API_KEY
         sync: false
-      - key: SMTP_PORT
-        value: "587"
-      - key: SMTP_USER
-        sync: false
-      - key: SMTP_PASS
-        sync: false
-      - key: MAIL_FROM
-        sync: false
+      - key: OPENAI_MODEL
+        value: gpt-5.6-luna
       - key: OWNER_EMAIL
         sync: false
       - key: OWNER_PASSWORD
-        sync: false
-      - key: PAYMENT_CARD
         sync: false

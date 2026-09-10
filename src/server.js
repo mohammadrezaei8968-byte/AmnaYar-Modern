@@ -274,7 +274,9 @@ function ibanDetails(input) {
 app.post('/api/check', auth, async (req, res) => {
   try {
     const kind = String(req.body.kind || '');
-    const input = String(req.body.input || '').replace(/\s/g, '');
+    const input = String(req.body.input || '')
+      .replace(/[\s-]/g, '')
+      .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)));
     const city = String(req.body.city || '').trim();
     const rules = {
       card: () => /^\d{16}$/.test(input) && luhn(input),
@@ -289,7 +291,7 @@ app.post('/api/check', auth, async (req, res) => {
     if (kind === 'national') details.issuingCity = city || 'ثبت نشده';
     if (kind === 'card') details.bankName = valid ? cardBank(input) : 'قابل شناسایی نیست (شماره کارت نامعتبر است)';
     if (kind === 'iban') Object.assign(details, valid ? ibanDetails(input) : { bankCode: '—', bankName: 'قابل شناسایی نیست (شماره شبا نامعتبر است)', accountNumber: '—' });
-    res.json({ valid, result, details });
+    res.json({ valid, result, mode: 'structural', details, note: 'این نتیجه فقط اعتبارسنجی ساختاری است و تأیید مالکیت یا فعال بودن حساب محسوب نمی‌شود.' });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'خطای ثبت استعلام.' });

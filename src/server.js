@@ -34,6 +34,7 @@ app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html']
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
+const imageLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
 const q = (text, params = []) => pool.query(text, params);
 const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
 const normalizeUsername = (v) => String(v || '').trim().toLowerCase();
@@ -134,7 +135,7 @@ app.get('/api/health', (req, res) => res.json({
   ok: true,
   service: 'amnayar-modern',
   ai: Boolean(openai),
-  model: process.env.OPENAI_MODEL || 'gpt-5.6-luna',
+  model: process.env.OPENAI_MODEL || 'gpt-5.6-sol',
 }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
@@ -270,8 +271,9 @@ app.post('/api/chat', auth, aiLimiter, async (req, res) => {
 
   try {
     const response = await openai.responses.create({
-      model: process.env.OPENAI_MODEL || 'gpt-5.6-luna',
-      instructions: 'تو دستیار هوشمند امنا یار هستی. فارسی روان و دقیق پاسخ بده. اگر موضوع پزشکی، حقوقی یا مالی پرریسک است، با احتیاط و بدون ادعای قطعیت راهنمایی کن. اطلاعات محرمانه مثل رمز، کلید API و اطلاعات بانکی حساس را درخواست نکن. پاسخ را کاربردی و منظم نگه دار.',
+      model: process.env.OPENAI_MODEL || 'gpt-5.6-sol',
+      instructions: 'تو AmnaYar AI، دستیار حرفه‌ای و دقیق امنا یار هستی. پاسخ‌ها را فارسی روان، روشن، کاربردی و ساختاریافته بده. هرگز اطلاعات، منبع، عدد، نام، قابلیت یا نتیجه‌ای را حدس نزن و جعل نکن؛ اگر مطمئن نیستی صریح بگو که مطمئن نیستی. برای اطلاعات روز، خبر، قیمت، قوانین، مشخصات محصولات و هر موضوعی که ممکن است تغییر کرده باشد از جست‌وجوی وب استفاده کن و نتیجه را با منبع قابل‌اعتماد پشتیبانی کن. برای مسائل پزشکی، حقوقی و مالی پرریسک با احتیاط و بدون ادعای قطعیت پاسخ بده. اطلاعات محرمانه مثل رمز، کلید API و اطلاعات بانکی حساس را درخواست نکن. وقتی کاربر درخواست تصویر دارد، توضیح متنیِ ساخت تصویر را جایگزین تولید تصویر نکن؛ تولید تصویر در قابلیت جداگانه AmnaYar انجام می‌شود.',
+      tools: [{ type: 'web_search' }],
       input: [{ role: 'user', content }],
       previous_response_id: conv.rows[0].previous_response_id || undefined,
     });
@@ -282,6 +284,29 @@ app.post('/api/chat', auth, aiLimiter, async (req, res) => {
   } catch (e) {
     console.error('AI error', e);
     const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
+    res.status(502).json({ error: detail });
+  }
+});
+
+app.post('/api/generate-image', auth, imageLimiter, async (req, res) => {
+  if (!openai) return res.status(503).json({ error: 'هوش مصنوعی هنوز فعال نشده است. کلید OPENAI_API_KEY باید در Render تنظیم شود.' });
+  const prompt = String(req.body?.prompt || '').trim();
+  if (!prompt) return res.status(400).json({ error: 'توضیح تصویر را وارد کنید.' });
+  if (prompt.length > 4000) return res.status(400).json({ error: 'توضیح تصویر بیش از حد طولانی است.' });
+  try {
+    const result = await openai.images.generate({
+      model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
+      prompt: `Create the requested image. Preserve the user's intent exactly. If the prompt is in Persian, understand it semantically. Do not add unrelated text, logos, watermarks, or invented requirements. User request: ${prompt}`,
+      size: 'auto',
+      quality: 'auto',
+      output_format: 'png',
+    });
+    const item = result?.data?.[0];
+    if (!item?.b64_json) throw new Error('IMAGE_DATA_MISSING');
+    res.json({ image: `data:image/png;base64,${item.b64_json}`, model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
+  } catch (e) {
+    console.error('Image generation error', e);
+    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه ساخت تصویر نمی‌دهد.' : 'ساخت تصویر با موتور هوش مصنوعی ناموفق بود. دوباره تلاش کنید.';
     res.status(502).json({ error: detail });
   }
 });

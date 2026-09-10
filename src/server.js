@@ -476,11 +476,14 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
       const lower = String(file.originalname || '').toLowerCase();
       const mime = String(file.mimetype || '').toLowerCase();
       if (mime.startsWith('image/')) {
-        // Send uploaded images directly as data URLs. This avoids file-id compatibility
-        // problems and matches the Responses API image-input contract.
-        const base64 = file.buffer.toString('base64');
-        const safeMime = mime === 'image/jpg' ? 'image/jpeg' : mime;
-        content.push({ type: 'input_image', image_url: `data:${safeMime};base64,${base64}`, detail: 'auto' });
+        // Upload the image through OpenAI Files and reference it as an input_image.
+        // This is more reliable for Render/server requests than sending a large data URL.
+        const openaiImage = await openai.files.create({
+          file: await toFile(file.buffer, file.originalname, { type: mime === 'image/jpg' ? 'image/jpeg' : mime }),
+          purpose: 'user_data',
+        });
+        uploadedForCleanup.push(openaiImage.id);
+        content.push({ type: 'input_image', file_id: openaiImage.id, detail: 'auto' });
       } else if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|webm|flac|aac)$/i.test(lower)) {
         try {
           const transcript = await openai.audio.transcriptions.create({
@@ -571,7 +574,7 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
       try { await openai.files.delete(fileId); } catch {}
     }
     console.error('AI error', e);
-    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه پاسخ‌گویی نمی‌دهد.' : e?.status === 400 ? 'فایل دریافت شد، اما قالب یا محتوای آن برای تحلیل قابل پردازش نبود. یک تصویر JPG یا PNG را امتحان کنید.' : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
+    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه پاسخ‌گویی نمی‌دهد.' : e?.status === 400 ? `OpenAI فایل را نپذیرفت: ${String(e?.message||'قالب یا محتوای فایل قابل پردازش نبود.').slice(0,220)}` : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
     res.status(502).json({ error: detail });
   }
 });

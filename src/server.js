@@ -43,9 +43,9 @@ const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHea
 const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
 const imageLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
 const plans = {
-  free: { name: 'رایگان', amount: 0, days: 30, messagesPerDay: 100, imagesPerDay: 2, model: 'gpt-5.6-luna' },
-  pro: { name: 'Pro', amount: 249000, days: 30, messagesPerDay: 500, imagesPerDay: 20, model: 'gpt-5.6-terra' },
-  business: { name: 'Business', amount: 699000, days: 30, messagesPerDay: 5000, imagesPerDay: 100, model: 'gpt-5.6-sol' },
+  free: { name: 'رایگان', amount: 0, days: 30, messagesPerDay: 200, imagesPerDay: 30, model: 'gpt-5.6-luna' },
+  pro: { name: 'Pro', amount: 249000, days: 30, messagesPerDay: 500, imagesPerDay: 60, model: 'gpt-5.6-terra' },
+  business: { name: 'Business', amount: 699000, days: 30, messagesPerDay: 5000, imagesPerDay: 200, model: 'gpt-5.6-sol' },
 };
 const q = (text, params = []) => pool.query(text, params);
 const normalizeEmail = (v) => String(v || '').trim().toLowerCase();

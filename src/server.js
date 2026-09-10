@@ -348,6 +348,20 @@ app.delete('/api/conversations/:id', auth, async (req, res) => {
   res.json({ ok: true });
 });
 
+// Browser-local AI message persistence. No OpenAI/API call is made here.
+app.post('/api/local-chat/save', auth, async (req, res) => {
+  try {
+    const conversationId = Number(req.body.conversationId);
+    const userText = String(req.body.userMessage || '').slice(0, 100000);
+    const answer = String(req.body.answer || '').slice(0, 100000);
+    const conv = await q('SELECT id FROM conversations WHERE id=$1 AND user_id=$2', [conversationId, req.user.id]);
+    if (!conv.rowCount) return res.status(404).json({ error: 'گفت‌وگو پیدا نشد.' });
+    await q("INSERT INTO messages(conversation_id,user_id,role,content) VALUES($1,$2,'user',$3),($1,$2,'assistant',$4)", [conversationId, req.user.id, userText, answer]);
+    await q("UPDATE conversations SET updated_at=NOW(), title=CASE WHEN title='گفت‌وگوی جدید' THEN LEFT($1,80) ELSE title END WHERE id=$2 AND user_id=$3", [userText || 'گفت‌وگوی جدید', conversationId, req.user.id]);
+    res.json({ ok: true });
+  } catch (e) { console.error(e); res.status(500).json({ error: 'ذخیره گفت‌وگو انجام نشد.' }); }
+});
+
 function detectImageRequest(text) {
   const t = String(text || '').toLowerCase();
   const create = /(بساز|بسازش|ایجاد کن|تولید کن|طراحی کن|رندر کن|نقاشی کن|تصویرسازی کن|generate|create|make|draw|design|render)/.test(t);

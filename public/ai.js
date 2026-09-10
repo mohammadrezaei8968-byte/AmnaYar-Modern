@@ -22,7 +22,85 @@ function addMessage(role,text,attachments=[]){const row=document.createElement('
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function useSuggestion(t){$('#messageInput').value=t;$('#messageInput').focus();}
 async function fileToDataUrl(file){return await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||''));r.onerror=reject;r.readAsDataURL(file);});}
-async function sendMessage(e){e.preventDefault();const input=$('#messageInput'),text=input.value.trim();if(!text&&!currentImageData&&!selectedFiles.length)return;if(!currentId)await newChat();const filesForSend=[...selectedFiles];addMessage('user',text||`پیوست ${filesForSend.length} فایل`);input.value='';$('#status').textContent='در حال پاسخ…';const typing=document.createElement('div');typing.className='message-row ai';typing.id='typing';typing.innerHTML='<div class="avatar">AI</div><div class="message">در حال بررسی فایل و فکر کردن…</div>';$('#messages').appendChild(typing);scrollToBottom('auto');try{const fd=new FormData();fd.append('conversationId',currentId);fd.append('message',text);if(currentImageData)fd.append('imageDataUrl',currentImageData);for(const file of filesForSend)fd.append('files',file,file.name);const r=await fetch('/api/chat',{method:'POST',body:fd});const raw=await r.text();let d={};try{d=raw?JSON.parse(raw):{};}catch{}if(!r.ok)throw new Error(d.error||`خطای سرور (${r.status})`);$('#typing')?.remove();addMessage('assistant',d.answer,d.attachments||[]);await loadConversations();}catch(err){$('#typing')?.remove();console.error(err);addMessage('assistant','⚠️ '+(err?.message||'ارتباط با سرور برقرار نشد.'));}finally{$('#status').textContent='آماده';clearImage();selectedFiles=[];renderFilePreview();}}
+let localEngine=null;
+let localEnginePromise=null;
+const LOCAL_MODEL='Qwen2.5-0.5B-Instruct-q4f16_1-MLC';
+const WEBLLM_CDN='https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.84/+esm';
+
+async function loadLocalEngine(){
+  if(localEngine)return localEngine;
+  if(localEnginePromise)return localEnginePromise;
+  localEnginePromise=(async()=>{
+    if(!navigator.gpu) throw new Error('مرورگر شما WebGPU را پشتیبانی نمی‌کند. برای هوش مصنوعی رایگان امنا یار از آخرین Chrome یا Edge استفاده کنید.');
+    $('#status').textContent='در حال آماده‌سازی هوش مصنوعی رایگان…';
+    const webllm=await import(WEBLLM_CDN);
+    localEngine=await webllm.CreateMLCEngine(LOCAL_MODEL,{initProgressCallback:(p)=>{
+      const pct=Math.max(0,Math.min(100,Math.round((p.progress||0)*100)));
+      $('#status').textContent=`در حال آماده‌سازی هوش مصنوعی روی دستگاه شما… ${pct}%`;
+    }});
+    $('#status').textContent='آماده • رایگان و روی دستگاه شما';
+    return localEngine;
+  })().catch(e=>{localEnginePromise=null;throw e;});
+  return localEnginePromise;
+}
+
+async function extractClientText(files){
+  const chunks=[];
+  for(const f of files){
+    if(/\.(txt|md|json|csv|xml|js|ts|py|html|css|sql|java|cpp|c|cs|go|rs|rb|php)$/i.test(f.name)){
+      try{const text=await f.text();chunks.push(`\n\n--- ${f.name} ---\n${text.slice(0,30000)}`);}catch{}
+    }
+  }
+  return chunks.join('');
+}
+
+async function saveLocalChat(userMessage,answer){
+  try{await api('/api/local-chat/save',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({conversationId:currentId,userMessage,answer})});}catch(e){console.warn('local chat save failed',e);}
+}
+
+async function sendMessage(e){
+  e.preventDefault();
+  const input=$('#messageInput'),text=input.value.trim();
+  if(!text&&!currentImageData&&!selectedFiles.length)return;
+  if(!currentId)await newChat();
+  const filesForSend=[...selectedFiles];
+  const clientText=await extractClientText(filesForSend);
+  const prompt=(text||'فایل‌های پیوست را بررسی کن.')+(clientText?`\n\nمحتوای فایل‌های متنی پیوست‌شده:${clientText}`:'');
+  addMessage('user',text||`پیوست ${filesForSend.length} فایل`);
+  input.value='';$('#status').textContent='در حال آماده‌سازی…';
+  const typing=document.createElement('div');typing.className='message-row ai';typing.id='typing';typing.innerHTML='<div class="avatar">AI</div><div class="message">در حال آماده‌سازی هوش مصنوعی روی دستگاه شما…</div>';
+  $('#messages').appendChild(typing);scrollToBottom('auto');
+  try{
+    if(currentImageData || filesForSend.some(f=>f.type.startsWith('image/'))){
+      throw new Error('نسخه رایگان روی دستگاه فعلاً تحلیل تصویر را انجام نمی‌دهد. برای متن، کد و فایل‌های متنی می‌توانید از آن استفاده کنید.');
+    }
+    const engine=await loadLocalEngine();
+    $('#typing .message').textContent='در حال فکر کردن…';
+    const history=[...$('#messages').querySelectorAll('.message-row')].slice(-12).map(row=>{
+      const role=row.classList.contains('user')?'user':'assistant';
+      const body=row.querySelector('.message')?.innerText||'';
+      return {role,content:body};
+    }).filter(x=>x.content);
+    const messages=[
+      {role:'system',content:'تو «امنا یار AI» هستی. دستیار فارسی، دقیق، صادق و کاربردی باش. اگر چیزی را نمی‌دانی حدس نزن. پاسخ‌ها را روشن و ساختاریافته بده. کاربر را از اینکه مدل روی دستگاه خودش اجرا می‌شود مطلع نکن مگر اینکه درباره زیرساخت بپرسد.'},
+      ...history.filter(x=>x.role!=='assistant' || x.content!=='در حال آماده‌سازی هوش مصنوعی روی دستگاه شما…').slice(-10),
+      {role:'user',content:prompt}
+    ];
+    const response=await engine.chat.completions.create({messages,temperature:0.7,max_tokens:700});
+    const answer=response.choices?.[0]?.message?.content?.trim()||'پاسخی تولید نشد.';
+    $('#typing')?.remove();
+    addMessage('assistant',answer);
+    await saveLocalChat(text||`پیوست ${filesForSend.length} فایل`,answer);
+    await loadConversations();
+  }catch(err){
+    $('#typing')?.remove();
+    console.error(err);
+    addMessage('assistant','⚠️ '+(err?.message||'اجرای هوش مصنوعی انجام نشد.'));
+  }finally{
+    $('#status').textContent=localEngine?'آماده • رایگان و روی دستگاه شما':'آماده';
+    clearImage();selectedFiles=[];renderFilePreview();
+  }
+}
 $('#imageInput')?.addEventListener('change',e=>onFilesSelected(e.target.files));
 async function logout(){await fetch('/api/auth/logout',{method:'POST'});location.href='/';}
 boot();

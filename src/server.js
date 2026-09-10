@@ -4,38 +4,22 @@ import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import OpenAI, { toFile } from 'openai';
 import pg from 'pg';
 import XLSX from 'xlsx';
-import fs from 'fs';
-import archiver from 'archiver';
-import PDFDocument from 'pdfkit';
-import { Document, Packer, Paragraph, TextRun, HeadingLevel } from 'docx';
-import pptxgen from 'pptxgenjs';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
-import multer from 'multer';
 import { fileURLToPath } from 'url';
 
 const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { files: 10, fileSize: 50 * 1024 * 1024 },
-});
 const PORT = Number(process.env.PORT || 10000);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') ? { rejectUnauthorized: false } : false,
 });
-const GENERATED_DIR = path.join(__dirname, '../public/generated');
-fs.mkdirSync(GENERATED_DIR, { recursive: true });
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 120000, maxRetries: 2 })
-  : null;
 
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: false }));
@@ -45,9 +29,6 @@ app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
-const aiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
-const imageLimiter = rateLimit({ windowMs: 60 * 1000, limit: 6, standardHeaders: true, legacyHeaders: false });
-const DEFAULT_AI_MODEL = process.env.OPENAI_MODEL || 'gpt-5.6-luna';
 
 const q = (text, params = []) => pool.query(text, params);
 const normalizeEmail = (v) => String(v || '').trim().toLowerCase();
@@ -136,12 +117,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({
-  ok: true,
-  service: 'amnayar-modern',
-  ai: Boolean(openai),
-  model: process.env.OPENAI_MODEL || 'gpt-5.6-sol',
-}));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -329,287 +305,19 @@ app.get('/api/dashboard', auth, async (req, res) => {
   res.json({ user: u.rows[0], checks: checks.rows });
 });
 
-// AI conversations and chat. OpenAI is optional at deploy time; the UI explains when the server key is missing.
-app.get('/api/conversations', auth, async (req, res) => {
-  const r = await q('SELECT id,title,created_at,updated_at FROM conversations WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 50', [req.user.id]);
-  res.json({ conversations: r.rows });
-});
-app.post('/api/conversations', auth, async (req, res) => {
-  const title = String(req.body.title || 'گفت‌وگوی جدید').slice(0, 80);
-  const r = await q('INSERT INTO conversations(user_id,title) VALUES($1,$2) RETURNING *', [req.user.id, title]);
-  res.json({ conversation: r.rows[0] });
-});
-app.get('/api/conversations/:id/messages', auth, async (req, res) => {
-  const r = await q('SELECT m.id,m.role,m.content,m.created_at FROM messages m JOIN conversations c ON c.id=m.conversation_id WHERE c.id=$1 AND c.user_id=$2 ORDER BY m.id ASC', [req.params.id, req.user.id]);
-  res.json({ messages: r.rows });
-});
-app.delete('/api/conversations/:id', auth, async (req, res) => {
-  await q('DELETE FROM conversations WHERE id=$1 AND user_id=$2', [req.params.id, req.user.id]);
-  res.json({ ok: true });
-});
-
-// Browser-local AI message persistence. No OpenAI/API call is made here.
-app.post('/api/local-chat/save', auth, async (req, res) => {
-  try {
-    const conversationId = Number(req.body.conversationId);
-    const userText = String(req.body.userMessage || '').slice(0, 100000);
-    const answer = String(req.body.answer || '').slice(0, 100000);
-    const conv = await q('SELECT id FROM conversations WHERE id=$1 AND user_id=$2', [conversationId, req.user.id]);
-    if (!conv.rowCount) return res.status(404).json({ error: 'گفت‌وگو پیدا نشد.' });
-    await q("INSERT INTO messages(conversation_id,user_id,role,content) VALUES($1,$2,'user',$3),($1,$2,'assistant',$4)", [conversationId, req.user.id, userText, answer]);
-    await q("UPDATE conversations SET updated_at=NOW(), title=CASE WHEN title='گفت‌وگوی جدید' THEN LEFT($1,80) ELSE title END WHERE id=$2 AND user_id=$3", [userText || 'گفت‌وگوی جدید', conversationId, req.user.id]);
-    res.json({ ok: true });
-  } catch (e) { console.error(e); res.status(500).json({ error: 'ذخیره گفت‌وگو انجام نشد.' }); }
-});
-
-function detectImageRequest(text) {
-  const t = String(text || '').toLowerCase();
-  const create = /(بساز|بسازش|ایجاد کن|تولید کن|طراحی کن|رندر کن|نقاشی کن|تصویرسازی کن|generate|create|make|draw|design|render)/.test(t);
-  const subject = /(تصویر|عکس|پوستر|لوگو|بنر|نقاشی|ایلوستریشن|illustration|image|photo|poster|logo|banner)/.test(t);
-  return create && subject;
-}
-function detectFileRequest(text) {
-  const t = String(text || '').toLowerCase();
-  return {
-    xlsx: /(اکسل|excel|xlsx|spreadsheet)/.test(t),
-    csv: /\bcsv\b|فایل csv/.test(t),
-    pdf: /(پی.?دی.?اف|pdf)/.test(t),
-    docx: /(ورد|word|docx|سند word)/.test(t),
-    pptx: /(پاورپوینت|powerpoint|pptx|اسلاید)/.test(t),
-    txt: /(فایل متنی|text file|\.txt\b)/.test(t),
-    md: /(markdown|مارک.?داون|\.md\b)/.test(t),
-    zip: /(zip|زیپ|پروژه|نرم.?افزار|اپلیکیشن|برنامه کامل|فایل پروژه)/.test(t),
-  };
-}
-function extractMarkdownTable(text) {
-  const lines = String(text || '').split(/\r?\n/).map(x=>x.trim()).filter(Boolean);
-  for (let i=0;i<lines.length-1;i++) {
-    if (lines[i].includes('|') && /^\|?\s*:?-{3,}/.test(lines[i+1].replace(/\|/g,'').trim())) {
-      const table=[];
-      const parse=(line)=>line.replace(/^\|/,'').replace(/\|$/,'').split('|').map(x=>x.trim());
-      table.push(parse(lines[i]));
-      i+=2;
-      while(i<lines.length && lines[i].includes('|') && !/^#{1,6}\s/.test(lines[i])) { table.push(parse(lines[i])); i++; }
-      return table;
-    }
-  }
-  return [];
-}
-function safeFileName(name) { return String(name).replace(/[^a-zA-Z0-9._-]/g,'_').slice(0,80) || 'output'; }
-function extractCodeBlocks(text) {
-  const blocks=[]; const re=/```([a-zA-Z0-9_+-]*)\n([\s\S]*?)```/g; let m;
-  while((m=re.exec(String(text)))) blocks.push({lang:(m[1]||'txt').toLowerCase(),code:m[2].trimEnd()});
-  return blocks;
-}
-function extForLang(lang) {
-  return ({javascript:'js',js:'js',typescript:'ts',ts:'ts',python:'py',py:'py',html:'html',css:'css',json:'json',sql:'sql',bash:'sh',shell:'sh',sh:'sh',jsx:'jsx',tsx:'tsx',java:'java',csharp:'cs',cs:'cs',cpp:'cpp',c:'c',php:'php','c++':'cpp',go:'go',rust:'rs',ruby:'rb',kotlin:'kt',swift:'swift',yaml:'yml',yml:'yml',xml:'xml'}[lang] || 'txt');
-}
-async function writeArtifact(kind, answer, userText) {
-  const id = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
-  const attachments=[];
-  const base=`amnayar-${id}`;
-  if (kind==='xlsx' || kind==='csv') {
-    let table=extractMarkdownTable(answer);
-    if (!table.length) table=[['متن خروجی'],[String(answer).slice(0,50000)]];
-    const ws=XLSX.utils.aoa_to_sheet(table);
-    const wb=XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'AmnaYar');
-    if(kind==='xlsx') {
-      const file=`${base}.xlsx`; XLSX.writeFile(wb,path.join(GENERATED_DIR,file));
-      attachments.push({type:'file',name:'فایل اکسل AmnaYar.xlsx',url:`/generated/${file}`});
-    } else {
-      const file=`${base}.csv`; const csv=XLSX.utils.sheet_to_csv(ws); fs.writeFileSync(path.join(GENERATED_DIR,file),csv,'utf8');
-      attachments.push({type:'file',name:'فایل CSV AmnaYar.csv',url:`/generated/${file}`});
-    }
-  } else if(kind==='txt' || kind==='md') {
-    const file=`${base}.${kind}`; fs.writeFileSync(path.join(GENERATED_DIR,file),answer,'utf8');
-    attachments.push({type:'file',name:`خروجی AmnaYar.${kind}`,url:`/generated/${file}`});
-  } else if(kind==='pdf') {
-    const file=`${base}.pdf`; const out=fs.createWriteStream(path.join(GENERATED_DIR,file));
-    const doc=new PDFDocument({margin:48}); doc.pipe(out); doc.fontSize(18).text('AmnaYar AI'); doc.moveDown();
-    doc.fontSize(11).text(String(answer),{width:500,align:'left'}); doc.end();
-    await new Promise((resolve,reject)=>{out.on('finish',resolve);out.on('error',reject);});
-    attachments.push({type:'file',name:'فایل PDF AmnaYar.pdf',url:`/generated/${file}`});
-  } else if(kind==='docx') {
-    const file=`${base}.docx`; const paragraphs=String(answer).split(/\r?\n/).map(line=>new Paragraph({children:[new TextRun(line||' ')]}));
-    const doc=new Document({sections:[{children:[new Paragraph({text:'AmnaYar AI',heading:HeadingLevel.TITLE}),...paragraphs]}]});
-    const buf=await Packer.toBuffer(doc); fs.writeFileSync(path.join(GENERATED_DIR,file),buf);
-    attachments.push({type:'file',name:'سند Word AmnaYar.docx',url:`/generated/${file}`});
-  } else if(kind==='pptx') {
-    const file=`${base}.pptx`; const ppt=new pptxgen(); ppt.layout='LAYOUT_WIDE';
-    const chunks=String(answer).split(/\n(?=#{1,3}\s)/).filter(Boolean); const parts=chunks.length?chunks:[String(answer)];
-    parts.slice(0,20).forEach((part,i)=>{const slide=ppt.addSlide(); const ls=part.split(/\r?\n/).filter(Boolean); slide.addText((ls[0]||`اسلاید ${i+1}`).replace(/^#+\s*/,''),{x:.6,y:.4,w:12,h:.6,fontSize:24,bold:true}); slide.addText(ls.slice(1).join('\n')||part,{x:.7,y:1.2,w:11.8,h:5.5,fontSize:16,breakLine:false});});
-    await ppt.writeFile({fileName:path.join(GENERATED_DIR,file)}); attachments.push({type:'file',name:'فایل PowerPoint AmnaYar.pptx',url:`/generated/${file}`});
-  } else if(kind==='zip') {
-    const blocks=extractCodeBlocks(answer); const file=`${base}-project.zip`; const out=fs.createWriteStream(path.join(GENERATED_DIR,file)); const archive=archiver('zip',{zlib:{level:9}}); archive.pipe(out);
-    if(blocks.length) blocks.forEach((b,i)=>archive.append(b.code,{name:`${i===0?'main':`file-${i+1}`}.${extForLang(b.lang)}`}));
-    archive.append(`# AmnaYar generated project\n\nRequest:\n${userText}\n`,{name:'README.md'}); archive.append(String(answer),{name:'AI-OUTPUT.txt'}); await archive.finalize();
-    await new Promise((resolve,reject)=>{out.on('close',resolve);out.on('error',reject);});
-    attachments.push({type:'file',name:'فایل پروژه ZIP AmnaYar.zip',url:`/generated/${file}`});
-  }
-  return attachments;
-}
-
-app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, res) => {
-  if (!openai) return res.status(503).json({ error: 'هوش مصنوعی هنوز فعال نشده است. کلید OPENAI_API_KEY باید در Render تنظیم شود.' });
-  const conversationId = Number(req.body.conversationId);
-  const message = String(req.body.message || '').trim();
-  const imageDataUrl = typeof req.body.imageDataUrl === 'string' ? req.body.imageDataUrl : '';
-  const uploadedFiles = Array.isArray(req.files) ? req.files : [];
-  if (!message && !imageDataUrl && !uploadedFiles.length) return res.status(400).json({ error: 'پیام یا فایل خالی است.' });
-  if (!conversationId) return res.status(400).json({ error: 'گفت‌وگو انتخاب نشده است.' });
-  const conv = await q('SELECT * FROM conversations WHERE id=$1 AND user_id=$2', [conversationId, req.user.id]);
-  if (!conv.rowCount) return res.status(404).json({ error: 'گفت‌وگو پیدا نشد.' });
-
-  const text = message || (uploadedFiles.length ? 'فایل‌های پیوست را بررسی کن و بر اساس محتوای آن‌ها پاسخ بده.' : 'این تصویر را بررسی کن و توضیح بده.');
-  const content = [{ type: 'input_text', text }];
-  if (imageDataUrl && /^data:image\/(png|jpeg|jpg|webp);base64,/i.test(imageDataUrl)) {
-    content.push({ type: 'input_image', image_url: imageDataUrl, detail: 'auto' });
-  }
-
-  const uploadedForCleanup = [];
-  try {
-    for (const file of uploadedFiles) {
-      const lower = String(file.originalname || '').toLowerCase();
-      const mime = String(file.mimetype || '').toLowerCase();
-      if (mime.startsWith('image/')) {
-        // Upload the image through OpenAI Files and reference it as an input_image.
-        // This is more reliable for Render/server requests than sending a large data URL.
-        const openaiImage = await openai.files.create({
-          file: await toFile(file.buffer, file.originalname, { type: mime === 'image/jpg' ? 'image/jpeg' : mime }),
-          purpose: 'user_data',
-        });
-        uploadedForCleanup.push(openaiImage.id);
-        content.push({ type: 'input_image', file_id: openaiImage.id, detail: 'auto' });
-      } else if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|webm|flac|aac)$/i.test(lower)) {
-        try {
-          const transcript = await openai.audio.transcriptions.create({
-            file: await toFile(file.buffer, file.originalname, { type: file.mimetype }),
-            model: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe',
-          });
-          if (transcript?.text) content.push({ type: 'input_text', text: `متن استخراج‌شده از فایل صوتی «${file.originalname}»:\n${transcript.text}` });
-        } catch (audioError) {
-          console.error('Audio transcription error', audioError);
-          content.push({ type: 'input_text', text: `فایل صوتی «${file.originalname}» دریافت شد، اما تبدیل صوت به متن انجام نشد.` });
-        }
-      } else if (mime.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v)$/i.test(lower)) {
-        content.push({ type: 'input_text', text: `فایل ویدیویی «${file.originalname}» دریافت شد. در این نسخه تحلیل مستقیم ویدیو توسط مدل فعال نیست؛ اگر هدف تحلیل گفتار ویدیو است، فایل صوتی آن را نیز ارسال کنید.` });
-      } else {
-        const openaiFile = await openai.files.create({
-          file: await toFile(file.buffer, file.originalname, { type: file.mimetype }),
-          purpose: 'user_data',
-        });
-        uploadedForCleanup.push(openaiFile.id);
-        content.push({ type: 'input_file', file_id: openaiFile.id });
-      }
-    }
-  } catch (uploadError) {
-    console.error('OpenAI file upload error', uploadError);
-    return res.status(400).json({ error: 'آپلود یا پردازش فایل انجام نشد. حجم یا نوع فایل را بررسی کنید.' });
-  }
-
-
-  try {
-    const request = {
-      model: DEFAULT_AI_MODEL,
-      instructions: 'تو AmnaYar AI، دستیار حرفه‌ای و دقیق امنا یار هستی. پاسخ‌ها را فارسی روان، روشن، کاربردی و ساختاریافته بده. هرگز اطلاعات، منبع، عدد، نام، قابلیت یا نتیجه‌ای را حدس نزن و جعل نکن؛ اگر مطمئن نیستی صریح بگو که مطمئن نیستی. برای درخواست فایل، محتوای مناسب همان قالب را آماده کن؛ برای Excel/CSV در صورت امکان جدول Markdown منظم بده و برای کدنویسی کد را داخل code block کامل و قابل اجرا قرار بده. برای اطلاعات روز، خبر، قیمت، قوانین، مشخصات محصولات و هر موضوعی که ممکن است تغییر کرده باشد از جست‌وجوی وب استفاده کن و نتیجه را با منبع قابل‌اعتماد پشتیبانی کن. برای مسائل پزشکی، حقوقی و مالی پرریسک با احتیاط و بدون ادعای قطعیت پاسخ بده. اطلاعات محرمانه مثل رمز، کلید API و اطلاعات بانکی حساس را درخواست نکن. اگر کاربر درخواست ساخت تصویر، فایل یا پروژه کرد، تا حد امکان خودِ خروجی را بساز و لینک آن را ارائه کن؛ فقط توضیح دادن درباره اینکه چگونه ساخته شود کافی نیست.',
-      tools: [{ type: 'web_search' }],
-      input: [{ role: 'user', content }],
-    };
-    if (conv.rows[0].previous_response_id) request.previous_response_id = conv.rows[0].previous_response_id;
-
-    let response;
-    try {
-      response = await openai.responses.create(request);
-    } catch (firstError) {
-      // If the conversation was created with a different model/version, the old
-      // previous_response_id can be incompatible. Retry once as a fresh response
-      // so upgrading the AI never breaks an existing conversation.
-      const msg = String(firstError?.message || '').toLowerCase();
-      const incompatible = /previous_response|response.*not found|not found.*response|cannot.*continue|incompatible/.test(msg);
-      if (!incompatible || !request.previous_response_id) throw firstError;
-      delete request.previous_response_id;
-      response = await openai.responses.create(request);
-    }
-    let answer = response.output_text?.trim() || 'پاسخی دریافت نشد.';
-    const fileReq = detectFileRequest(message);
-    let attachments = [];
-    const wantsImage = detectImageRequest(message);
-    if (wantsImage) {
-      try {
-        const imageResult = await openai.images.generate({
-          model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
-          prompt: `Create the requested image faithfully. Do not add unrelated text, logos, watermarks, or invented requirements. User request: ${message}`,
-          size: 'auto', quality: 'auto', output_format: 'png',
-        });
-        const item=imageResult?.data?.[0];
-        if (item?.b64_json) {
-          attachments.push({type:'image',name:'تصویر ساخته‌شده توسط AmnaYar AI',dataUrl:`data:image/png;base64,${item.b64_json}`});
-        }
-      } catch(imageError) {
-        console.error('Auto image generation error', imageError);
-        const detail = imageError?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه ساخت تصویر نمی‌دهد.' : 'ساخت تصویر انجام نشد، اما پاسخ متنی آماده است.';
-        answer += `\n\n⚠️ ${detail}`;
-      }
-    }
-    const fileKind = Object.entries(fileReq).find(([k,v])=>v)?.[0];
-    if (fileKind) {
-      try { attachments.push(...await writeArtifact(fileKind, answer, message)); } catch(fileError) { console.error('Artifact generation error', fileError); answer += '\n\n⚠️ ساخت فایل خروجی انجام نشد.'; }
-    }
-    await q('INSERT INTO messages(conversation_id,user_id,role,content) VALUES($1,$2,\'user\',$3),($1,$2,\'assistant\',$4)', [conversationId, req.user.id, text, answer]);
-    await q('UPDATE conversations SET previous_response_id=$1,updated_at=NOW(),title=CASE WHEN title=\'گفت‌وگوی جدید\' THEN LEFT($2,80) ELSE title END WHERE id=$3 AND user_id=$4', [response.id, text, conversationId, req.user.id]);
-    for (const fileId of uploadedForCleanup) {
-      try { await openai.files.delete(fileId); } catch {}
-    }
-    res.json({ answer, responseId: response.id, attachments });
-  } catch (e) {
-    for (const fileId of uploadedForCleanup) {
-      try { await openai.files.delete(fileId); } catch {}
-    }
-    console.error('AI error', e);
-    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه پاسخ‌گویی نمی‌دهد.' : e?.status === 400 ? `OpenAI فایل را نپذیرفت: ${String(e?.message||'قالب یا محتوای فایل قابل پردازش نبود.').slice(0,220)}` : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
-    res.status(502).json({ error: detail });
-  }
-});
-
-app.post('/api/generate-image', auth, imageLimiter, async (req, res) => {
-  if (!openai) return res.status(503).json({ error: 'هوش مصنوعی هنوز فعال نشده است. کلید OPENAI_API_KEY باید در Render تنظیم شود.' });
-  const prompt = String(req.body?.prompt || '').trim();
-  if (!prompt) return res.status(400).json({ error: 'توضیح تصویر را وارد کنید.' });
-  if (prompt.length > 4000) return res.status(400).json({ error: 'توضیح تصویر بیش از حد طولانی است.' });
-  try {
-    const result = await openai.images.generate({
-      model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
-      prompt: `Create the requested image. Preserve the user's intent exactly. If the prompt is in Persian, understand it semantically. Do not add unrelated text, logos, watermarks, or invented requirements. User request: ${prompt}`,
-      size: 'auto',
-      quality: 'auto',
-      output_format: 'png',
-    });
-    const item = result?.data?.[0];
-    if (!item?.b64_json) throw new Error('IMAGE_DATA_MISSING');
-    res.json({ image: `data:image/png;base64,${item.b64_json}`, model: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2' });
-  } catch (e) {
-    console.error('Image generation error', e);
-    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه ساخت تصویر نمی‌دهد.' : 'ساخت تصویر با موتور هوش مصنوعی ناموفق بود. دوباره تلاش کنید.';
-    res.status(502).json({ error: detail });
-  }
-});
-
 app.get('/api/owner/stats', auth, owner, async (req, res) => {
-  const [users, checks, messages] = await Promise.all([
+  const [users, checks] = await Promise.all([
     q("SELECT COUNT(*)::int count FROM users WHERE role='user'"),
     q('SELECT COUNT(*)::int count FROM checks'),
-    q('SELECT COUNT(*)::int count FROM messages'),
   ]);
-  res.json({ users: users.rows[0].count, checks: checks.rows[0].count, messages: messages.rows[0].count });
+  res.json({ users: users.rows[0].count, checks: checks.rows[0].count });
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;
   const checks = (await q('SELECT c.id,u.email,u.username,c.kind,c.result,c.created_at FROM checks c JOIN users u ON u.id=c.user_id ORDER BY c.id DESC')).rows;
-  const messages = (await q('SELECT m.id,u.email,u.username,m.role,m.content,m.created_at FROM messages m JOIN users u ON u.id=m.user_id ORDER BY m.id DESC LIMIT 5000')).rows;
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(users), 'Users');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(checks), 'Checks');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(messages), 'Messages');
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', 'attachment; filename="amnayar-report.xlsx"');
@@ -617,9 +325,7 @@ app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
 });
 
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, '../public/dashboard.html')));
-app.get('/ai', (req, res) => res.sendFile(path.join(__dirname, '../public/ai.html')));
 app.get('/owner', (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
-app.get('/pricing', (req, res) => res.redirect('/#features'));
 app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 init().then(() => app.listen(PORT, () => console.log(`AmnaYar running on ${PORT}`))).catch(e => { console.error(e); process.exit(1); });

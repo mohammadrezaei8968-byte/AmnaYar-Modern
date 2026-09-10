@@ -1,8 +1,7 @@
 services:
   - type: web
-    name: amnayar-modern
-    env: node
-    plan: free
+    name: amnayar-web
+    runtime: node
     buildCommand: npm install
     startCommand: npm start
     envVars:

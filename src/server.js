@@ -4,7 +4,7 @@ import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import OpenAI from 'openai';
+import OpenAI, { toFile } from 'openai';
 import pg from 'pg';
 import XLSX from 'xlsx';
 import fs from 'fs';
@@ -15,11 +15,16 @@ import pptxgen from 'pptxgenjs';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import multer from 'multer';
 import { fileURLToPath } from 'url';
 
 const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { files: 10, fileSize: 50 * 1024 * 1024 },
+});
 const PORT = Number(process.env.PORT || 10000);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
 const pool = new Pool({
@@ -446,22 +451,57 @@ async function writeArtifact(kind, answer, userText) {
   return attachments;
 }
 
-app.post('/api/chat', auth, aiLimiter, async (req, res) => {
+app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, res) => {
   if (!openai) return res.status(503).json({ error: 'هوش مصنوعی هنوز فعال نشده است. کلید OPENAI_API_KEY باید در Render تنظیم شود.' });
   const plan = await getPlan(req.user.id);
   if (!(await canUseUsage(req.user.id, 'message', plan.messagesPerDay))) return res.status(429).json({ error: `سهم روزانه طرح ${plan.name} شما تمام شده است. برای ادامه، طرح Pro یا Business را فعال کنید.`, code:'PLAN_LIMIT', plan:plan.key });
   const conversationId = Number(req.body.conversationId);
   const message = String(req.body.message || '').trim();
   const imageDataUrl = typeof req.body.imageDataUrl === 'string' ? req.body.imageDataUrl : '';
-  if (!message && !imageDataUrl) return res.status(400).json({ error: 'پیام خالی است.' });
+  const uploadedFiles = Array.isArray(req.files) ? req.files : [];
+  if (!message && !imageDataUrl && !uploadedFiles.length) return res.status(400).json({ error: 'پیام یا فایل خالی است.' });
   if (!conversationId) return res.status(400).json({ error: 'گفت‌وگو انتخاب نشده است.' });
   const conv = await q('SELECT * FROM conversations WHERE id=$1 AND user_id=$2', [conversationId, req.user.id]);
   if (!conv.rowCount) return res.status(404).json({ error: 'گفت‌وگو پیدا نشد.' });
 
-  const text = message || 'این تصویر را بررسی کن و توضیح بده.';
+  const text = message || (uploadedFiles.length ? 'فایل‌های پیوست را بررسی کن و بر اساس محتوای آن‌ها پاسخ بده.' : 'این تصویر را بررسی کن و توضیح بده.');
   const content = [{ type: 'input_text', text }];
   if (imageDataUrl && /^data:image\/(png|jpeg|jpg|webp);base64,/i.test(imageDataUrl)) {
     content.push({ type: 'input_image', image_url: imageDataUrl, detail: 'auto' });
+  }
+
+  const uploadedForCleanup = [];
+  try {
+    for (const file of uploadedFiles) {
+      const lower = String(file.originalname || '').toLowerCase();
+      const mime = String(file.mimetype || '').toLowerCase();
+      const openaiFile = await openai.files.create({
+        file: await toFile(file.buffer, file.originalname, { type: file.mimetype }),
+        purpose: 'user_data',
+      });
+      uploadedForCleanup.push(openaiFile.id);
+      if (mime.startsWith('image/')) {
+        content.push({ type: 'input_image', file_id: openaiFile.id, detail: 'auto' });
+      } else if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|webm|flac|aac)$/i.test(lower)) {
+        try {
+          const transcript = await openai.audio.transcriptions.create({
+            file: await toFile(file.buffer, file.originalname, { type: file.mimetype }),
+            model: process.env.OPENAI_TRANSCRIBE_MODEL || 'gpt-transcribe',
+          });
+          if (transcript?.text) content.push({ type: 'input_text', text: `متن استخراج‌شده از فایل صوتی «${file.originalname}»:\n${transcript.text}` });
+        } catch (audioError) {
+          console.error('Audio transcription error', audioError);
+          content.push({ type: 'input_text', text: `فایل صوتی «${file.originalname}» دریافت شد، اما تبدیل صوت به متن انجام نشد.` });
+        }
+      } else if (mime.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v)$/i.test(lower)) {
+        content.push({ type: 'input_text', text: `فایل ویدیویی «${file.originalname}» دریافت شد. در این نسخه تحلیل مستقیم ویدیو توسط مدل فعال نیست؛ اگر هدف تحلیل گفتار ویدیو است، فایل صوتی آن را نیز ارسال کنید.` });
+      } else {
+        content.push({ type: 'input_file', file_id: openaiFile.id });
+      }
+    }
+  } catch (uploadError) {
+    console.error('OpenAI file upload error', uploadError);
+    return res.status(400).json({ error: 'آپلود یا پردازش فایل انجام نشد. حجم یا نوع فایل را بررسی کنید.' });
   }
 
   const wantsImageRequest = detectImageRequest(message);
@@ -518,8 +558,14 @@ app.post('/api/chat', auth, aiLimiter, async (req, res) => {
     await q('INSERT INTO messages(conversation_id,user_id,role,content) VALUES($1,$2,\'user\',$3),($1,$2,\'assistant\',$4)', [conversationId, req.user.id, text, answer]);
     await q('UPDATE conversations SET previous_response_id=$1,updated_at=NOW(),title=CASE WHEN title=\'گفت‌وگوی جدید\' THEN LEFT($2,80) ELSE title END WHERE id=$3 AND user_id=$4', [response.id, text, conversationId, req.user.id]);
     await recordUsage(req.user.id, 'message');
+    for (const fileId of uploadedForCleanup) {
+      try { await openai.files.delete(fileId); } catch {}
+    }
     res.json({ answer, responseId: response.id, attachments });
   } catch (e) {
+    for (const fileId of uploadedForCleanup) {
+      try { await openai.files.delete(fileId); } catch {}
+    }
     console.error('AI error', e);
     const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه پاسخ‌گویی نمی‌دهد.' : e?.status === 400 ? 'درخواست به موتور هوش مصنوعی نامعتبر بود. تنظیمات مدل را بررسی می‌کنیم.' : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
     res.status(502).json({ error: detail });

@@ -475,13 +475,12 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
     for (const file of uploadedFiles) {
       const lower = String(file.originalname || '').toLowerCase();
       const mime = String(file.mimetype || '').toLowerCase();
-      const openaiFile = await openai.files.create({
-        file: await toFile(file.buffer, file.originalname, { type: file.mimetype }),
-        purpose: 'user_data',
-      });
-      uploadedForCleanup.push(openaiFile.id);
       if (mime.startsWith('image/')) {
-        content.push({ type: 'input_image', file_id: openaiFile.id, detail: 'auto' });
+        // Send uploaded images directly as data URLs. This avoids file-id compatibility
+        // problems and matches the Responses API image-input contract.
+        const base64 = file.buffer.toString('base64');
+        const safeMime = mime === 'image/jpg' ? 'image/jpeg' : mime;
+        content.push({ type: 'input_image', image_url: `data:${safeMime};base64,${base64}`, detail: 'auto' });
       } else if (mime.startsWith('audio/') || /\.(mp3|wav|m4a|ogg|webm|flac|aac)$/i.test(lower)) {
         try {
           const transcript = await openai.audio.transcriptions.create({
@@ -496,6 +495,11 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
       } else if (mime.startsWith('video/') || /\.(mp4|mov|avi|mkv|webm|m4v)$/i.test(lower)) {
         content.push({ type: 'input_text', text: `فایل ویدیویی «${file.originalname}» دریافت شد. در این نسخه تحلیل مستقیم ویدیو توسط مدل فعال نیست؛ اگر هدف تحلیل گفتار ویدیو است، فایل صوتی آن را نیز ارسال کنید.` });
       } else {
+        const openaiFile = await openai.files.create({
+          file: await toFile(file.buffer, file.originalname, { type: file.mimetype }),
+          purpose: 'user_data',
+        });
+        uploadedForCleanup.push(openaiFile.id);
         content.push({ type: 'input_file', file_id: openaiFile.id });
       }
     }
@@ -567,7 +571,7 @@ app.post('/api/chat', auth, aiLimiter, upload.array('files', 10), async (req, re
       try { await openai.files.delete(fileId); } catch {}
     }
     console.error('AI error', e);
-    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه پاسخ‌گویی نمی‌دهد.' : e?.status === 400 ? 'درخواست به موتور هوش مصنوعی نامعتبر بود. تنظیمات مدل را بررسی می‌کنیم.' : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
+    const detail = e?.status === 401 ? 'کلید OpenAI روی سرور معتبر نیست.' : e?.status === 429 ? 'سقف یا اعتبار سرویس OpenAI فعلاً اجازه پاسخ‌گویی نمی‌دهد.' : e?.status === 400 ? 'فایل دریافت شد، اما قالب یا محتوای آن برای تحلیل قابل پردازش نبود. یک تصویر JPG یا PNG را امتحان کنید.' : 'ارتباط با موتور هوش مصنوعی برقرار نشد.';
     res.status(502).json({ error: detail });
   }
 });

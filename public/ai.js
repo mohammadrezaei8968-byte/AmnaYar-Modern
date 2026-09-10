@@ -1,7 +1,7 @@
 let currentId=null,currentImageData='';
 const $=s=>document.querySelector(s);
 async function api(url,opt={}){const r=await fetch(url,opt);const d=await r.json().catch(()=>({}));if(!r.ok)throw new Error(d.error||'خطا');return d}
-async function boot(){try{const me=await api('/api/me');if(me.user.role==='owner')$('#ownerLink').classList.remove('hidden');$('#planBadge').textContent=`${me.plan.name} · ${me.plan.messagesUsed}/${me.plan.messagesLimit} پیام امروز`;await loadConversations();}catch{location.href='/';}}
+async function boot(){try{const me=await api('/api/me');document.getElementById('usernameBadge').textContent=me.user.username;document.getElementById('usernameBadge').classList.remove('hidden');if(me.user.role==='owner')$('#ownerLink').classList.remove('hidden');$('#planBadge').textContent=`${me.plan.name} · ${me.plan.messagesUsed}/${me.plan.messagesLimit} پیام امروز`;await loadConversations();}catch{location.href='/';}}
 async function loadConversations(){const d=await api('/api/conversations');$('#conversationList').innerHTML=d.conversations.map(c=>`<button class="conv ${c.id==currentId?'active':''}" onclick="openChat(${c.id})">${esc(c.title)}</button>`).join('');if(!currentId){if(d.conversations[0])await openChat(d.conversations[0].id);else await newChat();}}
 async function newChat(){const d=await api('/api/conversations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'گفت‌وگوی جدید'})});currentId=d.conversation.id;$('#messages').innerHTML='';showWelcome();$('#chatTitle').textContent='گفت‌وگوی جدید';await loadConversations();}
 function scrollToBottom(behavior='auto'){const box=$('#messages');if(!box)return;requestAnimationFrame(()=>{box.scrollTo({top:box.scrollHeight,behavior});});}

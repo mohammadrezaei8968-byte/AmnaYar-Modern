@@ -9,3 +9,7 @@ async function api(url,method='GET',body){const r=await fetch(url,{method,header
 async function startCheck(kind){const me=await api('/api/me');if(me.error){openAuth('login');return}location.href='/dashboard.html?check='+encodeURIComponent(kind)}
 async function openAI(){const me=await api('/api/me');if(me.error){openAuth('login');return}location.href='/ai.html'}
 function openPricing(){location.href='/pricing.html'}
+
+async function loadNavUser(){const box=document.getElementById('navActions');if(!box)return;const me=await api('/api/me');if(me.error)return;box.innerHTML=`<span class="user-chip">${me.user.username}</span><a class="btn soft" href="/dashboard.html">داشبورد</a><button class="btn ghost" onclick="logoutNav()">خروج</button>`}
+async function logoutNav(){await api('/api/auth/logout','POST');location.reload()}
+loadNavUser();

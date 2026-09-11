@@ -160,6 +160,110 @@ async function init() {
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
 
+
+  // v3.4 canonical HR fields based on the organization's real Excel report structure.
+  const alterStatements = [
+    `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS address TEXT`,
+    `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS postal_code TEXT`,
+    `ALTER TABLE organizations ADD COLUMN IF NOT EXISTS store_supervisor TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS hire_date TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS job_title TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS system_job_title TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS unit_name TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS department_code TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS status TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS province TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS region TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS supervisor_unit TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS supervisor TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS cooperation_type TEXT`,
+    `ALTER TABLE employees ADD COLUMN IF NOT EXISTS gender TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS system_name TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS store_type TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS status TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS province TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS city TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS urban_area TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS city_code TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS opening_date TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS manager TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS manager_code TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS chief TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS workshop_code TEXT`,
+    `ALTER TABLE stores ADD COLUMN IF NOT EXISTS phone TEXT`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS standard_hours NUMERIC(10,2)`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS presence_hours NUMERIC(10,2)`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS leave_used_percent NUMERIC(6,2)`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS leave_balance NUMERIC(10,2)`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS health_card_status TEXT`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS medical_docs_pending NUMERIC(10,2)`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS insurance_status TEXT`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS no_shift_staff NUMERIC(10,2)`,
+    `ALTER TABLE attendance_records ADD COLUMN IF NOT EXISTS source_sheet TEXT`
+  ];
+  for (const statement of alterStatements) await q(statement);
+  await q(`CREATE TABLE IF NOT EXISTS store_metrics(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    store_code TEXT NOT NULL,
+    period TEXT NOT NULL DEFAULT '',
+    recommended_headcount NUMERIC(10,2),
+    actual_headcount NUMERIC(10,2),
+    staffing_gap NUMERIC(10,2),
+    presence_hours NUMERIC(10,2),
+    attendance_percent NUMERIC(6,2),
+    overtime_hours NUMERIC(10,2),
+    excess_presence_hours NUMERIC(10,2),
+    standard_hours NUMERIC(10,2),
+    standard_presence_hours NUMERIC(10,2),
+    standard_to_date_percent NUMERIC(6,2),
+    leave_used_percent NUMERIC(6,2),
+    leave_balance NUMERIC(10,2),
+    no_shift_staff NUMERIC(10,2),
+    health_card_issues NUMERIC(10,2),
+    medical_docs_pending NUMERIC(10,2),
+    source_sheet TEXT,
+    imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id,store_code,period)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS supervisor_summaries(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    supervisor TEXT NOT NULL,
+    period TEXT NOT NULL DEFAULT '',
+    total_stores NUMERIC(10,2),
+    franchise_stores NUMERIC(10,2),
+    leased_stores NUMERIC(10,2),
+    employee_count NUMERIC(10,2),
+    recommended_headcount NUMERIC(10,2),
+    staffing_gap NUMERIC(10,2),
+    standard_hours NUMERIC(10,2),
+    standard_presence_hours NUMERIC(10,2),
+    standard_to_date_percent NUMERIC(6,2),
+    presence_hours NUMERIC(10,2),
+    attendance_percent NUMERIC(6,2),
+    excess_presence_hours NUMERIC(10,2),
+    overtime_hours NUMERIC(10,2),
+    leave_balance NUMERIC(10,2),
+    leave_used_percent NUMERIC(6,2),
+    health_card_issues NUMERIC(10,2),
+    medical_docs_pending NUMERIC(10,2),
+    no_shift_staff NUMERIC(10,2),
+    source_sheet TEXT,
+    imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id,supervisor,period)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS import_batches(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    filename TEXT NOT NULL,
+    detected_sheets JSONB NOT NULL DEFAULT '[]'::jsonb,
+    warnings JSONB NOT NULL DEFAULT '[]'::jsonb,
+    stats JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+
   await q(`CREATE TABLE IF NOT EXISTS checks(
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -182,7 +286,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.3.0', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.4.0', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -376,102 +480,127 @@ app.get('/api/dashboard', auth, async (req, res) => {
 function digitsFa(v) {
   return String(v ?? '').replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).trim();
 }
+function textValue(v) { return String(v ?? '').trim(); }
 function numValue(v) {
   const s = digitsFa(v).replace(/,/g, '.').replace(/٪/g, '').trim();
-  if (!s) return null;
+  if (!s || s === '#N/A' || s === '#VALUE!' || s === '#REF!' || s === '#DIV/0!') return null;
   const n = Number(s);
   return Number.isFinite(n) ? n : null;
 }
 function headerKey(v) {
-  return String(v ?? '').replace(/[\u200c\u200f\u200e]/g,'').replace(/[\s_\-]+/g,'').replace(/[():：]/g,'').trim().toLowerCase();
+  return String(v ?? '').replace(/[\u200c\u200f\u200e]/g,'').replace(/[\s_\-]+/g,'').replace(/[():：؟?]/g,'').trim().toLowerCase();
 }
-const columnAliases = {
-  storeCode:['کد فروشگاه','کدفروشگاه','storecode','store_code'],
-  storeName:['نام فروشگاه','نامفروشگاه','storename','store_name'],
-  storeAddress:['آدرس فروشگاه','آدرسفروشگاه','آدرس','storeaddress','address'],
-  storePostal:['کد پستی فروشگاه','کدپستيفروشگاه','کد پستی','کدپستی','storepostal','postalcode'],
-  supervisor:['سوپروایزر فروشگاه','سوپروایزر','سرپرست فروشگاه','supervisor'],
-  personnelCode:['کد پرسنلی','کدپرسنلی','کد پرسنل','personnelcode','personnel_code','employeeid'],
-  firstName:['نام پرسنل','نام','firstname','first_name'],
-  lastName:['نام خانوادگی پرسنل','نام خانوادگی','نامخانوادگی','lastname','last_name'],
-  overtime:['اضافه کار پرسنل','اضافه کار','اضافه‌کار','اضافهکار','overtime','overtimehours'],
-  allowed:['ساعت مجاز پرسنل','ساعت مجاز','ساعات مجاز','allowedhours','allowed_hours'],
-  attendance:['درصد حضور پرسنل','درصد حضور','درصدحضور','attendance','attendancepercent','attendance_percent'],
-  excess:['مازاد حضور پرسنل','مازاد حضور','مازادحضور','excesshours','excess_hours'],
-  period:['دوره','ماه','دوره گزارش','period','month']
-};
-const aliasMap = new Map(Object.entries(columnAliases).flatMap(([k,arr]) => arr.map(a => [headerKey(a), k])));
-function mapRow(row) {
-  const out = {};
-  for (const [k,v] of Object.entries(row)) { const target = aliasMap.get(headerKey(k)); if (target) out[target] = v; }
-  return out;
+function pick(row, aliases) {
+  const wanted = aliases.map(headerKey);
+  for (const [k,v] of Object.entries(row)) if (wanted.includes(headerKey(k))) return v;
+  return '';
 }
-function normalizeUploadRow(row, defaultPeriod='') {
-  const r=mapRow(row);
+function firstNonEmpty(...vals) { for (const v of vals) if (v !== undefined && v !== null && String(v).trim() !== '') return v; return ''; }
+function normalizePeriod(v, fallback='') { return digitsFa(firstNonEmpty(v, fallback)); }
+function cleanRow(row) { const out={}; for(const [k,v] of Object.entries(row)) out[String(k).trim()]=v; return out; }
+
+function parseBasicEmployee(row) {
+  const r=cleanRow(row);
   return {
-    storeCode: digitsFa(r.storeCode), storeName:String(r.storeName||'').trim(), storeAddress:String(r.storeAddress||'').trim(), storePostal:digitsFa(r.storePostal), supervisor:String(r.supervisor||'').trim(),
-    personnelCode:digitsFa(r.personnelCode), firstName:String(r.firstName||'').trim(), lastName:String(r.lastName||'').trim(),
-    overtime:numValue(r.overtime) ?? 0, allowed:numValue(r.allowed), attendance:numValue(r.attendance), excess:numValue(r.excess) ?? 0, period:digitsFa(r.period || defaultPeriod)
+    personnelCode:digitsFa(pick(r,['کد پرسنلي اصلی','کد پرسنلی','کد پرسنلي','کد پرسنل'])),
+    firstName:textValue(pick(r,['نام'])), lastName:textValue(pick(r,['نام خانوادگي','نام خانوادگی'])),
+    hireDate:textValue(pick(r,['تاريخ استخدام','تاریخ استخدام'])),
+    jobTitle:textValue(pick(r,['سمت'])), systemJobTitle:textValue(pick(r,['سمت سیستمی'])),
+    unitName:textValue(pick(r,['واحد','واحد سرپرست'])), departmentCode:digitsFa(pick(r,['کد دپارتمان'])),
+    status:textValue(pick(r,['آخرين وضعيت (فعال / غيرفعال)','آخرین وضعیت','وضعيت','وضعیت'])),
+    province:textValue(pick(r,['سریال استان مستقل','استان'])), region:textValue(pick(r,['سریال گروه منطقه','منطقه'])),
+    supervisorUnit:textValue(pick(r,['واحد سرپرست'])), storeCode:digitsFa(pick(r,['کد فروشگاه'])),
+    storeName:textValue(pick(r,['نام فروشگاه'])), supervisor:textValue(pick(r,['سوپروایزر'])),
+    cooperationType:textValue(pick(r,['آخرين نوع همکاري','آخرین نوع همکاری','نوع همکاری'])), gender:textValue(pick(r,['جنسيت','جنسیت']))
   };
 }
-async function getHRContext(req, res) {
-  if (req.user.role === 'owner') {
-    const orgId = Number(req.query.org_id || 0);
-    const r = orgId ? await q('SELECT * FROM organizations WHERE id=$1',[orgId]) : await q('SELECT * FROM organizations ORDER BY id LIMIT 1');
-    if (!r.rowCount) { res.status(404).json({error:'هنوز سازمانی ساخته نشده است.'}); return null; }
-    return r.rows[0];
+function parseStore(row) {
+  const r=cleanRow(row);
+  return {
+    storeCode:digitsFa(pick(r,['کد فروشگاه','کد فروشگاه سیستم منابع انسانی'])),
+    storeName:textValue(firstNonEmpty(pick(r,['نام فروشگاه']),pick(r,['نام فروشگاه سیستم منابع انسانی']))),
+    systemName:textValue(pick(r,['نام فروشگاه سیستم منابع انسانی'])), address:textValue(firstNonEmpty(pick(r,['آدرس']),pick(r,['آدرس سیستمی']),pick(r,['آدرس2']))),
+    postalCode:digitsFa(firstNonEmpty(pick(r,['کدپستی اصلی']),pick(r,['کد پستی']))), supervisor:textValue(firstNonEmpty(pick(r,['سوپروایزر']),pick(r,['سوپروایزر/معین فروش']))),
+    supervisorCode:digitsFa(pick(r,['کد سوپروایزر'])), storeType:textValue(pick(r,['نوع فروشگاه','نوع'])), status:textValue(pick(r,['وضعیت','فعال؟'])),
+    province:textValue(pick(r,['استان'])), city:textValue(pick(r,['شهر'])), urbanArea:textValue(pick(r,['منطقه شهری'])), cityCode:digitsFa(pick(r,['کد شهر'])),
+    openingDate:textValue(firstNonEmpty(pick(r,['تاریخ افتتاحیه']),pick(r,['تاریخ افتتاحیه2']))), manager:textValue(pick(r,['مدیر','نام و نام خانوادگی عامل'])),
+    managerCode:digitsFa(pick(r,['کد رئیس'])), chief:textValue(pick(r,['رئیس'])), workshopCode:digitsFa(pick(r,['کد کارگاهی'])), phone:textValue(firstNonEmpty(pick(r,['تلفن']),pick(r,['شماره تماس عامل'])))
+  };
+}
+function parseStoreMetrics(row, period, sheet) {
+  const r=cleanRow(row);
+  return {
+    storeCode:digitsFa(pick(r,['کد فروشگاه'])), period:normalizePeriod(pick(r,['دوره','ماه']),period),
+    recommendedHeadcount:numValue(pick(r,['تعداد نفر پیشنهادی','پرسنل مجاز','تعداد مجاز'])), actualHeadcount:numValue(pick(r,['تعداد پرسنل'])), staffingGap:numValue(pick(r,['مغایرت نیرو'])),
+    presenceHours:numValue(pick(r,['ساعت حضور تا دیروز'])), attendancePercent:numValue(pick(r,['درصد حضور'])), overtimeHours:numValue(pick(r,['اضافه کار تا دیروز'])), excessPresenceHours:numValue(pick(r,['ساعت مازاد حضور'])),
+    standardHours:numValue(pick(r,['ساعت استاندارد'])), standardPresenceHours:numValue(pick(r,['ساعت حضور استاندارد تا دیروز'])), standardToDatePercent:numValue(pick(r,['درصد استاندارد تا دیروز'])),
+    leaveUsedPercent:numValue(pick(r,['درصد مرخصی استفاده شده'])), leaveBalance:numValue(firstNonEmpty(pick(r,['مانده مرخصی']),pick(r,['مانده مرخصی ماه گذشته']))),
+    noShiftStaff:numValue(pick(r,['پرسنل بدون شیفت'])), healthCardIssues:numValue(pick(r,['فاقد/منقضی/کمتر از 15 روز - کارت بهداشت'])), medicalDocsPending:numValue(pick(r,['تعداد مدارک درمانی تحویل نشده'])), sourceSheet:sheet
+  };
+}
+function parseAttendance(row, period, sheet) {
+  const r=cleanRow(row);
+  const personnelCode=digitsFa(pick(r,['کد پرسنلي اصلی','کد پرسنلی','کد پرسنلي','کد پرسنل','کد پرسنلی اصلی']));
+  if(!personnelCode) return null;
+  return { personnelCode, period:normalizePeriod(pick(r,['دوره','ماه']),period), storeCode:digitsFa(pick(r,['کد فروشگاه'])), firstName:textValue(pick(r,['نام'])), lastName:textValue(pick(r,['نام خانوادگي','نام خانوادگی'])),
+    standardHours:numValue(pick(r,['ساعت استاندارد'])), allowedHours:numValue(pick(r,['ساعت مجاز','ساعت مجاز پرسنل'])), presenceHours:numValue(pick(r,['ساعت حضور','ساعت حضور تا دیروز'])),
+    attendancePercent:numValue(pick(r,['درصد حضور'])), overtimeHours:numValue(pick(r,['اضافه کار پرسنل','اضافه کار تا دیروز'])), excessHours:numValue(pick(r,['ساعت مازاد حضور','مازاد حضور پرسنل'])),
+    leaveUsedPercent:numValue(pick(r,['درصد مرخصی استفاده شده'])), leaveBalance:numValue(pick(r,['مانده مرخصی'])), noShiftStaff:numValue(pick(r,['پرسنل بدون شیفت'])),
+    healthCardStatus:textValue(pick(r,['کارت بهداشت','فاقد/منقضی/کمتر از 15 روز - کارت بهداشت'])), medicalDocsPending:numValue(pick(r,['تعداد مدارک درمانی تحویل نشده'])), insuranceStatus:textValue(pick(r,['وضعیت بیمه'])), sourceSheet:sheet };
+}
+function parseSupervisor(row, period, sheet) {
+  const r=cleanRow(row); const supervisor=textValue(pick(r,['سوپروایزر'])); if(!supervisor) return null;
+  return { supervisor, period:normalizePeriod(pick(r,['دوره','ماه']),period), totalStores:numValue(pick(r,['تعداد کل فروشگاه زیرمجموعه'])), franchiseStores:numValue(pick(r,['تعداد فروشگاه فرانچایز'])), leasedStores:numValue(pick(r,['تعداد فروشگاه اجاره ای'])),
+    employeeCount:numValue(pick(r,['تعداد پرسنل'])), recommendedHeadcount:numValue(pick(r,['تعداد نفر پیشنهادی'])), staffingGap:numValue(pick(r,['مغایرت نیرو'])), standardHours:numValue(pick(r,['ساعت استاندارد'])), standardPresenceHours:numValue(pick(r,['ساعت حضور استاندارد تا دیروز'])), standardToDatePercent:numValue(pick(r,['درصد استاندارد تا دیروز'])), presenceHours:numValue(pick(r,['ساعت حضور تا دیروز'])), attendancePercent:numValue(pick(r,['درصد حضور'])), excessPresenceHours:numValue(pick(r,['ساعت مازاد حضور'])), overtimeHours:numValue(pick(r,['اضافه کار تا دیروز'])), leaveBalance:numValue(pick(r,['مانده مرخصی'])), leaveUsedPercent:numValue(pick(r,['درصد استفاده شده از مرخصی زیرمجموعه'])), healthCardIssues:numValue(pick(r,['فاقد/منقضی/کمتر از 15 روز - کارت بهداشت'])), medicalDocsPending:numValue(pick(r,['تعداد مدارک درمانی تحویل نشده'])), noShiftStaff:numValue(pick(r,['پرسنل بدون شیفت'])), sourceSheet:sheet };
+}
+function workbookPreview(wb, defaultPeriod='') {
+  const sheetStats=[]; const warnings=[]; let employeeRows=0,storeRows=0,attendanceRows=0,storeMetricRows=0,supervisorRows=0;
+  for(const name of wb.SheetNames){ const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:'',raw:false}); const headers=rows[0]?Object.keys(rows[0]):[]; const nk=headerKey(name); let kind='نادیده';
+    if(nk.includes('basicreport')) {kind='پرسنل'; employeeRows+=rows.length;} else if(nk==='store' || nk.includes('فروشگاهها')) {kind='فروشگاه'; storeRows+=rows.length;} else if(nk.includes('رندشده')) {kind='حضور/شاخص'; attendanceRows+=rows.length;storeMetricRows+=rows.length;} else if(nk.includes('سوپروایزر')) {kind='خلاصه سوپروایزر';supervisorRows+=rows.length;} else if(nk.includes('pivot')) kind='گزارش تجمیعی مرجع';
+    const errors=rows.reduce((n,r)=>n+Object.values(r).filter(v=>String(v).startsWith('#')).length,0); if(errors) warnings.push(`${name}: ${errors} سلول خطادار مثل #N/A یا #VALUE!`);
+    sheetStats.push({name,kind,rows:rows.length,columns:headers.length,headers:headers.slice(0,12)});
   }
-  if (req.user.role !== 'hr') { res.status(403).json({error:'دسترسی مدیر منابع انسانی لازم است.'}); return null; }
-  const r = await q(`SELECT o.* FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.member_role='hr' ORDER BY o.id LIMIT 1`,[req.user.id]);
-  if (!r.rowCount) { res.status(404).json({error:'سازمانی برای این حساب منابع انسانی تعریف نشده است.'}); return null; }
-  return r.rows[0];
+  if(!wb.SheetNames.some(n=>headerKey(n).includes('basicreport'))) warnings.push('برگه Basic report پیدا نشد؛ اطلاعات پرسنل ممکن است ناقص باشد.');
+  return {sheetStats,warnings,counts:{employeeRows,storeRows,attendanceRows,storeMetricRows,supervisorRows}};
+}
+async function getHRContext(req, res) {
+  if (req.user.role === 'owner') { const orgId=Number(req.query.org_id||req.body?.org_id||0); const r=orgId?await q('SELECT * FROM organizations WHERE id=$1',[orgId]):await q('SELECT * FROM organizations ORDER BY id LIMIT 1'); if(!r.rowCount){res.status(404).json({error:'هنوز سازمانی ساخته نشده است.'});return null;} return r.rows[0]; }
+  if(req.user.role!=='hr'){res.status(403).json({error:'دسترسی مدیر منابع انسانی لازم است.'});return null;}
+  const r=await q(`SELECT o.* FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.member_role='hr' ORDER BY o.id LIMIT 1`,[req.user.id]); if(!r.rowCount){res.status(404).json({error:'سازمانی برای این حساب منابع انسانی تعریف نشده است.'});return null;} return r.rows[0];
 }
 
-app.get('/api/hr/dashboard', auth, async (req,res)=>{
-  try {
-    const org=await getHRContext(req,res); if(!org)return;
-    const period=digitsFa(req.query.period||''); const search=String(req.query.search||'').trim();
-    const like=`%${search}%`;
-    const params=[org.id]; let p=2; const periodClause=period?` AND a.period=$${p++}`:''; const searchClause=search?` AND (e.personnel_code ILIKE $${p} OR e.first_name ILIKE $${p} OR e.last_name ILIKE $${p} OR COALESCE(s.store_name,'') ILIKE $${p})`:''; if(period)params.push(period); if(search)params.push(like);
-    const [employees,stores,attendance,stats]=await Promise.all([
-      q(`SELECT e.personnel_code,e.first_name,e.last_name,e.store_code,s.store_name,a.overtime_hours,a.allowed_hours,a.attendance_percent,a.excess_hours FROM employees e LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code LEFT JOIN LATERAL (SELECT * FROM attendance_records a0 WHERE a0.organization_id=e.organization_id AND a0.personnel_code=e.personnel_code${period?' AND a0.period=$2':''} ORDER BY a0.id DESC LIMIT 1) a ON true WHERE e.organization_id=$1${search?` AND (e.personnel_code ILIKE $${period?3:2} OR e.first_name ILIKE $${period?3:2} OR e.last_name ILIKE $${period?3:2} OR COALESCE(s.store_name,'') ILIKE $${period?3:2})`:''} ORDER BY e.personnel_code LIMIT 500`, period?[org.id,period,...(search?[like]:[])]:[org.id,...(search?[like]:[])]),
-      q(`SELECT s.*,COUNT(e.id)::int employee_count FROM stores s LEFT JOIN employees e ON e.organization_id=s.organization_id AND e.store_code=s.store_code WHERE s.organization_id=$1 GROUP BY s.id ORDER BY s.store_code LIMIT 500`,[org.id]),
-      q(`SELECT a.period,a.personnel_code,e.first_name,e.last_name,a.overtime_hours,a.allowed_hours,a.attendance_percent,a.excess_hours FROM attendance_records a LEFT JOIN employees e ON e.organization_id=a.organization_id AND e.personnel_code=a.personnel_code WHERE a.organization_id=$1${periodClause}${searchClause} ORDER BY a.id DESC LIMIT 1000`,params),
-      q(`SELECT (SELECT COUNT(*) FROM employees WHERE organization_id=$1)::int employees,(SELECT COUNT(*) FROM stores WHERE organization_id=$1)::int stores,COALESCE((SELECT AVG(attendance_percent) FROM attendance_records WHERE organization_id=$1${period?' AND period=$2':''}),0)::numeric attendance_avg,COALESCE((SELECT SUM(overtime_hours) FROM attendance_records WHERE organization_id=$1${period?' AND period=$2':''}),0)::numeric overtime_total`,period?[org.id,period]:[org.id])
-    ]);
-    res.json({organization:org,stats:stats.rows[0],employees:employees.rows,stores:stores.rows,attendance:attendance.rows});
-  }catch(e){console.error(e);res.status(500).json({error:'خطای دریافت داشبورد منابع انسانی.'})}
-});
+app.post('/api/hr/preview', auth, upload.single('report'), async(req,res)=>{ try{const org=await getHRContext(req,res);if(!org)return;if(!req.file)return res.status(400).json({error:'فایل گزارش را انتخاب کنید.'});const ext=path.extname(req.file.originalname).toLowerCase();if(!['.xlsx','.xls','.csv'].includes(ext))return res.status(400).json({error:'فقط فایل Excel یا CSV مجاز است.'});const wb=XLSX.read(req.file.buffer,{type:'buffer',cellDates:false});const preview=workbookPreview(wb,digitsFa(req.body.period||''));res.json({ok:true,filename:req.file.originalname,organization:{id:org.id,name:org.name,code:org.code},...preview});}catch(e){console.error(e);res.status(500).json({error:'پیش‌نمایش فایل انجام نشد.'})} });
 
-app.post('/api/hr/import', auth, upload.single('report'), async (req,res)=>{
-  try {
-    const org=await getHRContext(req,res); if(!org)return;
-    if(!req.file)return res.status(400).json({error:'فایل گزارش را انتخاب کنید.'});
-    const ext=path.extname(req.file.originalname).toLowerCase(); if(!['.xlsx','.xls','.csv'].includes(ext))return res.status(400).json({error:'فقط فایل Excel یا CSV مجاز است.'});
-    const wb=XLSX.read(req.file.buffer,{type:'buffer',cellDates:false}); let rows=[];
-    for(const name of wb.SheetNames){const sheet=XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:''}); rows.push(...sheet.map(normalizeUploadRow));}
-    const defaultPeriod=digitsFa(req.body.period||''); rows=rows.map(r=>({...r,period:r.period||defaultPeriod}));
-    let imported=0,updated=0;
-    for(const r of rows){
-      if(r.storeCode && r.storeName){const old=await q('SELECT id FROM stores WHERE organization_id=$1 AND store_code=$2',[org.id,r.storeCode]); await q(`INSERT INTO stores(organization_id,store_code,store_name,address,postal_code,supervisor,updated_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT(organization_id,store_code) DO UPDATE SET store_name=EXCLUDED.store_name,address=EXCLUDED.address,postal_code=EXCLUDED.postal_code,supervisor=EXCLUDED.supervisor,updated_at=NOW()`,[org.id,r.storeCode,r.storeName,r.storeAddress||null,r.storePostal||null,r.supervisor||null]); old.rowCount?updated++:imported++;}
-      if(r.personnelCode){const old=await q('SELECT id FROM employees WHERE organization_id=$1 AND personnel_code=$2',[org.id,r.personnelCode]); await q(`INSERT INTO employees(organization_id,personnel_code,first_name,last_name,store_code,updated_at) VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(organization_id,personnel_code) DO UPDATE SET first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,store_code=EXCLUDED.store_code,updated_at=NOW()`,[org.id,r.personnelCode,r.firstName,r.lastName,r.storeCode||null]); old.rowCount?updated++:imported++; if(r.period){const oldA=await q('SELECT id FROM attendance_records WHERE organization_id=$1 AND personnel_code=$2 AND period=$3',[org.id,r.personnelCode,r.period]); await q(`INSERT INTO attendance_records(organization_id,personnel_code,period,overtime_hours,allowed_hours,attendance_percent,excess_hours) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(organization_id,personnel_code,period) DO UPDATE SET overtime_hours=EXCLUDED.overtime_hours,allowed_hours=EXCLUDED.allowed_hours,attendance_percent=EXCLUDED.attendance_percent,excess_hours=EXCLUDED.excess_hours,imported_at=NOW()`,[org.id,r.personnelCode,r.period,r.overtime,r.allowed,r.attendance,r.excess]); oldA.rowCount?updated++:imported++;}}
-    }
-    await q('INSERT INTO report_imports(organization_id,user_id,filename,rows_imported) VALUES($1,$2,$3,$4)',[org.id,req.user.id,req.file.originalname,rows.length]);
-    res.json({ok:true,imported,updated,rows:rows.length});
-  }catch(e){console.error(e);res.status(500).json({error:'پردازش فایل انجام نشد. قالب ستون‌ها را بررسی کنید.'})}
-});
+app.get('/api/hr/dashboard', auth, async(req,res)=>{try{const org=await getHRContext(req,res);if(!org)return;const period=digitsFa(req.query.period||'');const search=String(req.query.search||'').trim();const like=`%${search}%`;const p1=[org.id];if(period)p1.push(period);if(search)p1.push(like);const periodSql=period?' AND a.period=$2':'';const searchSql=search?` AND (e.personnel_code ILIKE $${period?3:2} OR e.first_name ILIKE $${period?3:2} OR e.last_name ILIKE $${period?3:2} OR COALESCE(s.store_name,'') ILIKE $${period?3:2})`:'';
+ const [employees,stores,attendance,storeMetrics,supervisors,stats,imports]=await Promise.all([
+ q(`SELECT e.personnel_code,e.first_name,e.last_name,e.store_code,s.store_name,e.hire_date,e.job_title,e.unit_name,e.status,e.supervisor,e.cooperation_type,a.period,a.overtime_hours,a.allowed_hours,a.attendance_percent,a.excess_hours,a.presence_hours,a.health_card_status FROM employees e LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code LEFT JOIN LATERAL(SELECT * FROM attendance_records a0 WHERE a0.organization_id=e.organization_id AND a0.personnel_code=e.personnel_code${period?' AND a0.period=$2':''} ORDER BY a0.id DESC LIMIT 1)a ON true WHERE e.organization_id=$1${searchSql} ORDER BY e.personnel_code LIMIT 1000`,p1),
+ q(`SELECT s.*,COUNT(e.id)::int employee_count FROM stores s LEFT JOIN employees e ON e.organization_id=s.organization_id AND e.store_code=s.store_code WHERE s.organization_id=$1 GROUP BY s.id ORDER BY s.store_code LIMIT 1000`,[org.id]),
+ q(`SELECT a.period,a.personnel_code,e.first_name,e.last_name,e.store_code,s.store_name,a.standard_hours,a.allowed_hours,a.presence_hours,a.overtime_hours,a.attendance_percent,a.excess_hours,a.leave_used_percent,a.leave_balance,a.health_card_status,a.medical_docs_pending,a.insurance_status,a.no_shift_staff FROM attendance_records a LEFT JOIN employees e ON e.organization_id=a.organization_id AND e.personnel_code=a.personnel_code LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code WHERE a.organization_id=$1${period?' AND a.period=$2':''}${search?` AND (a.personnel_code ILIKE $${period?3:2} OR e.first_name ILIKE $${period?3:2} OR e.last_name ILIKE $${period?3:2} OR COALESCE(s.store_name,'') ILIKE $${period?3:2})`:''} ORDER BY a.id DESC LIMIT 1500`,p1),
+ q(`SELECT * FROM store_metrics WHERE organization_id=$1${period?' AND period=$2':''} ORDER BY store_code LIMIT 1000`,period?[org.id,period]:[org.id]),
+ q(`SELECT * FROM supervisor_summaries WHERE organization_id=$1${period?' AND period=$2':''} ORDER BY supervisor LIMIT 500`,period?[org.id,period]:[org.id]),
+ q(`SELECT (SELECT COUNT(*) FROM employees WHERE organization_id=$1)::int employees,(SELECT COUNT(*) FROM stores WHERE organization_id=$1)::int stores,COALESCE((SELECT AVG(attendance_percent) FROM attendance_records WHERE organization_id=$1${period?' AND period=$2':''}),0)::numeric attendance_avg,COALESCE((SELECT SUM(overtime_hours) FROM attendance_records WHERE organization_id=$1${period?' AND period=$2':''}),0)::numeric overtime_total,COALESCE((SELECT SUM(excess_presence_hours) FROM store_metrics WHERE organization_id=$1${period?' AND period=$2':''}),0)::numeric excess_total`,period?[org.id,period]:[org.id]),
+ q(`SELECT id,filename,rows_imported,created_at FROM report_imports WHERE organization_id=$1 ORDER BY id DESC LIMIT 20`,[org.id])
+ ]);res.json({organization:org,stats:stats.rows[0],employees:employees.rows,stores:stores.rows,attendance:attendance.rows,storeMetrics:storeMetrics.rows,supervisors:supervisors.rows,imports:imports.rows});}catch(e){console.error(e);res.status(500).json({error:'خطای دریافت داشبورد منابع انسانی.'})}});
 
-async function hrExportData(req){
-  const org=await getHRContext(req,{status:()=>{},json:()=>{}}); if(!org)throw new Error('no org');
-  const period=digitsFa(req.query.period||''); const search=String(req.query.search||'').trim(); const params=[org.id]; let extra=''; if(period){params.push(period);extra+=' AND a.period=$'+params.length;} if(search){params.push('%'+search+'%');extra+=' AND (e.personnel_code ILIKE $'+params.length+' OR e.first_name ILIKE $'+params.length+' OR e.last_name ILIKE $'+params.length+' OR COALESCE(s.store_name,\'\') ILIKE $'+params.length+')';}
-  const employees=(await q(`SELECT e.personnel_code AS "کد پرسنلی",e.first_name AS "نام",e.last_name AS "نام خانوادگی",e.store_code AS "کد فروشگاه",s.store_name AS "نام فروشگاه",a.overtime_hours AS "اضافه کار پرسنل",a.allowed_hours AS "ساعت مجاز پرسنل",a.attendance_percent AS "درصد حضور پرسنل",a.excess_hours AS "مازاد حضور پرسنل",a.period AS "دوره" FROM employees e LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code LEFT JOIN LATERAL (SELECT * FROM attendance_records a0 WHERE a0.organization_id=e.organization_id AND a0.personnel_code=e.personnel_code${period?' AND a0.period=$2':''} ORDER BY a0.id DESC LIMIT 1) a ON true WHERE e.organization_id=$1${search?` AND (e.personnel_code ILIKE $${period?3:2} OR e.first_name ILIKE $${period?3:2} OR e.last_name ILIKE $${period?3:2} OR COALESCE(s.store_name,'') ILIKE $${period?3:2})`:''} ORDER BY e.personnel_code`,period?[org.id,period,...(search?[`%${search}%`]:[])]:[org.id,...(search?[`%${search}%`]:[])] )).rows;
-  const stores=(await q(`SELECT store_code AS "کد فروشگاه",store_name AS "نام فروشگاه",address AS "آدرس فروشگاه",postal_code AS "کد پستی فروشگاه",supervisor AS "سوپروایزر فروشگاه" FROM stores WHERE organization_id=$1 ORDER BY store_code`,[org.id])).rows;
-  const attendance=(await q(`SELECT a.period AS "دوره",a.personnel_code AS "کد پرسنلی",e.first_name AS "نام",e.last_name AS "نام خانوادگی",a.overtime_hours AS "اضافه کار پرسنل",a.allowed_hours AS "ساعت مجاز پرسنل",a.attendance_percent AS "درصد حضور پرسنل",a.excess_hours AS "مازاد حضور پرسنل" FROM attendance_records a LEFT JOIN employees e ON e.organization_id=a.organization_id AND e.personnel_code=a.personnel_code WHERE a.organization_id=$1${extra} ORDER BY a.id DESC`,params)).rows;
-  return {org,employees,stores,attendance};
-}
-app.get('/api/hr/export.xlsx',auth,async(req,res)=>{try{const d=await hrExportData(req);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.employees),'پرسنل');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.stores),'فروشگاه‌ها');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.attendance),'حضور و غیاب');const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-hr.xlsx"`);res.send(buf)}catch(e){console.error(e);res.status(500).json({error:'خروجی Excel آماده نشد.'})}});
-app.get('/api/hr/export.csv',auth,async(req,res)=>{try{const d=await hrExportData(req);const rows=d.employees.map(x=>({"کد فروشگاه":x['کد فروشگاه'],"نام فروشگاه":x['نام فروشگاه'],"کد پرسنلی":x['کد پرسنلی'],"نام":x['نام'],"نام خانوادگی":x['نام خانوادگی'],"اضافه کار پرسنل":x['اضافه کار پرسنل'],"ساعت مجاز پرسنل":x['ساعت مجاز پرسنل'],"درصد حضور پرسنل":x['درصد حضور پرسنل'],"مازاد حضور پرسنل":x['مازاد حضور پرسنل'],"دوره":x['دوره']}));const csv='\ufeff'+XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(rows));res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-hr.csv"`);res.send(csv)}catch(e){console.error(e);res.status(500).json({error:'خروجی CSV آماده نشد.'})}});
+app.post('/api/hr/import', auth, upload.single('report'), async(req,res)=>{try{const org=await getHRContext(req,res);if(!org)return;if(!req.file)return res.status(400).json({error:'فایل گزارش را انتخاب کنید.'});const ext=path.extname(req.file.originalname).toLowerCase();if(!['.xlsx','.xls','.csv'].includes(ext))return res.status(400).json({error:'فقط فایل Excel یا CSV مجاز است.'});const period=digitsFa(req.body.period||'');const wb=XLSX.read(req.file.buffer,{type:'buffer',cellDates:false});const preview=workbookPreview(wb,period);const employees=new Map(),stores=new Map(),attendance=new Map(),storeMetrics=new Map(),supervisors=new Map();
+ for(const name of wb.SheetNames){const rows=XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:'',raw:false});const nk=headerKey(name);if(nk.includes('basicreport')){for(const row of rows){const x=parseBasicEmployee(row);if(x.personnelCode)employees.set(x.personnelCode,x);if(x.storeCode&&x.storeName&&!stores.has(x.storeCode))stores.set(x.storeCode,parseStore(row));}}
+ else if(nk==='store'){for(const row of rows){const x=parseStore(row);if(x.storeCode)stores.set(x.storeCode,x);}}
+ else if(nk.includes('فروشگاهها')){for(const row of rows){const st=parseStore(row);if(st.storeCode)stores.set(st.storeCode,{...(stores.get(st.storeCode)||{}),...st});const m=parseStoreMetrics(row,period,name);if(m.storeCode)storeMetrics.set(`${m.storeCode}|${m.period}`,m);}}
+ else if(nk.includes('رندشده')){for(const row of rows){const a=parseAttendance(row,period,name);if(a)attendance.set(`${a.personnelCode}|${a.period}`,a);const m=parseStoreMetrics(row,period,name);if(m.storeCode)storeMetrics.set(`${m.storeCode}|${m.period}`,m);}}
+ else if(nk.includes('سوپروایزر')){for(const row of rows){const s=parseSupervisor(row,period,name);if(s)supervisors.set(`${s.supervisor}|${s.period}`,s);}}
+ }
+ const client=await pool.connect();try{await client.query('BEGIN');
+ for(const x of stores.values()) await client.query(`INSERT INTO stores(organization_id,store_code,store_name,system_name,address,postal_code,supervisor,store_type,status,province,city,urban_area,city_code,opening_date,manager,manager_code,chief,workshop_code,phone,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,NOW()) ON CONFLICT(organization_id,store_code) DO UPDATE SET store_name=COALESCE(NULLIF(EXCLUDED.store_name,''),stores.store_name),system_name=COALESCE(NULLIF(EXCLUDED.system_name,''),stores.system_name),address=COALESCE(NULLIF(EXCLUDED.address,''),stores.address),postal_code=COALESCE(NULLIF(EXCLUDED.postal_code,''),stores.postal_code),supervisor=COALESCE(NULLIF(EXCLUDED.supervisor,''),stores.supervisor),store_type=COALESCE(NULLIF(EXCLUDED.store_type,''),stores.store_type),status=COALESCE(NULLIF(EXCLUDED.status,''),stores.status),province=COALESCE(NULLIF(EXCLUDED.province,''),stores.province),city=COALESCE(NULLIF(EXCLUDED.city,''),stores.city),urban_area=COALESCE(NULLIF(EXCLUDED.urban_area,''),stores.urban_area),city_code=COALESCE(NULLIF(EXCLUDED.city_code,''),stores.city_code),opening_date=COALESCE(NULLIF(EXCLUDED.opening_date,''),stores.opening_date),manager=COALESCE(NULLIF(EXCLUDED.manager,''),stores.manager),manager_code=COALESCE(NULLIF(EXCLUDED.manager_code,''),stores.manager_code),chief=COALESCE(NULLIF(EXCLUDED.chief,''),stores.chief),workshop_code=COALESCE(NULLIF(EXCLUDED.workshop_code,''),stores.workshop_code),phone=COALESCE(NULLIF(EXCLUDED.phone,''),stores.phone),updated_at=NOW()`,[org.id,x.storeCode,x.storeName,x.systemName,x.address,x.postalCode,x.supervisor,x.storeType,x.status,x.province,x.city,x.urbanArea,x.cityCode,x.openingDate,x.manager,x.managerCode,x.chief,x.workshopCode,x.phone]);
+ for(const x of employees.values()) await client.query(`INSERT INTO employees(organization_id,personnel_code,first_name,last_name,store_code,hire_date,job_title,system_job_title,unit_name,department_code,status,province,region,supervisor_unit,supervisor,cooperation_type,gender,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW()) ON CONFLICT(organization_id,personnel_code) DO UPDATE SET first_name=COALESCE(NULLIF(EXCLUDED.first_name,''),employees.first_name),last_name=COALESCE(NULLIF(EXCLUDED.last_name,''),employees.last_name),store_code=COALESCE(NULLIF(EXCLUDED.store_code,''),employees.store_code),hire_date=COALESCE(NULLIF(EXCLUDED.hire_date,''),employees.hire_date),job_title=COALESCE(NULLIF(EXCLUDED.job_title,''),employees.job_title),system_job_title=COALESCE(NULLIF(EXCLUDED.system_job_title,''),employees.system_job_title),unit_name=COALESCE(NULLIF(EXCLUDED.unit_name,''),employees.unit_name),department_code=COALESCE(NULLIF(EXCLUDED.department_code,''),employees.department_code),status=COALESCE(NULLIF(EXCLUDED.status,''),employees.status),province=COALESCE(NULLIF(EXCLUDED.province,''),employees.province),region=COALESCE(NULLIF(EXCLUDED.region,''),employees.region),supervisor_unit=COALESCE(NULLIF(EXCLUDED.supervisor_unit,''),employees.supervisor_unit),supervisor=COALESCE(NULLIF(EXCLUDED.supervisor,''),employees.supervisor),cooperation_type=COALESCE(NULLIF(EXCLUDED.cooperation_type,''),employees.cooperation_type),gender=COALESCE(NULLIF(EXCLUDED.gender,''),employees.gender),updated_at=NOW()`,[org.id,x.personnelCode,x.firstName,x.lastName,x.storeCode||null,x.hireDate,x.jobTitle,x.systemJobTitle,x.unitName,x.departmentCode,x.status,x.province,x.region,x.supervisorUnit,x.supervisor,x.cooperationType,x.gender]);
+ for(const x of attendance.values()) await client.query(`INSERT INTO attendance_records(organization_id,personnel_code,period,standard_hours,overtime_hours,allowed_hours,presence_hours,attendance_percent,excess_hours,leave_used_percent,leave_balance,health_card_status,medical_docs_pending,insurance_status,no_shift_staff,source_sheet) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) ON CONFLICT(organization_id,personnel_code,period) DO UPDATE SET standard_hours=EXCLUDED.standard_hours,overtime_hours=EXCLUDED.overtime_hours,allowed_hours=EXCLUDED.allowed_hours,presence_hours=EXCLUDED.presence_hours,attendance_percent=EXCLUDED.attendance_percent,excess_hours=EXCLUDED.excess_hours,leave_used_percent=EXCLUDED.leave_used_percent,leave_balance=EXCLUDED.leave_balance,health_card_status=EXCLUDED.health_card_status,medical_docs_pending=EXCLUDED.medical_docs_pending,insurance_status=EXCLUDED.insurance_status,no_shift_staff=EXCLUDED.no_shift_staff,source_sheet=EXCLUDED.source_sheet,imported_at=NOW()`,[org.id,x.personnelCode,x.period,x.standardHours,x.overtimeHours,x.allowedHours,x.presenceHours,x.attendancePercent,x.excessHours,x.leaveUsedPercent,x.leaveBalance,x.healthCardStatus,x.medicalDocsPending,x.insuranceStatus,x.noShiftStaff,x.sourceSheet]);
+ for(const x of storeMetrics.values()) await client.query(`INSERT INTO store_metrics(organization_id,store_code,period,recommended_headcount,actual_headcount,staffing_gap,presence_hours,attendance_percent,overtime_hours,excess_presence_hours,standard_hours,standard_presence_hours,standard_to_date_percent,leave_used_percent,leave_balance,no_shift_staff,health_card_issues,medical_docs_pending,source_sheet) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) ON CONFLICT(organization_id,store_code,period) DO UPDATE SET recommended_headcount=EXCLUDED.recommended_headcount,actual_headcount=EXCLUDED.actual_headcount,staffing_gap=EXCLUDED.staffing_gap,presence_hours=EXCLUDED.presence_hours,attendance_percent=EXCLUDED.attendance_percent,overtime_hours=EXCLUDED.overtime_hours,excess_presence_hours=EXCLUDED.excess_presence_hours,standard_hours=EXCLUDED.standard_hours,standard_presence_hours=EXCLUDED.standard_presence_hours,standard_to_date_percent=EXCLUDED.standard_to_date_percent,leave_used_percent=EXCLUDED.leave_used_percent,leave_balance=EXCLUDED.leave_balance,no_shift_staff=EXCLUDED.no_shift_staff,health_card_issues=EXCLUDED.health_card_issues,medical_docs_pending=EXCLUDED.medical_docs_pending,source_sheet=EXCLUDED.source_sheet,imported_at=NOW()`,[org.id,x.storeCode,x.period,x.recommendedHeadcount,x.actualHeadcount,x.staffingGap,x.presenceHours,x.attendancePercent,x.overtimeHours,x.excessPresenceHours,x.standardHours,x.standardPresenceHours,x.standardToDatePercent,x.leaveUsedPercent,x.leaveBalance,x.noShiftStaff,x.healthCardIssues,x.medicalDocsPending,x.sourceSheet]);
+ for(const x of supervisors.values()) await client.query(`INSERT INTO supervisor_summaries(organization_id,supervisor,period,total_stores,franchise_stores,leased_stores,employee_count,recommended_headcount,staffing_gap,standard_hours,standard_presence_hours,standard_to_date_percent,presence_hours,attendance_percent,excess_presence_hours,overtime_hours,leave_balance,leave_used_percent,health_card_issues,medical_docs_pending,no_shift_staff,source_sheet) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22) ON CONFLICT(organization_id,supervisor,period) DO UPDATE SET total_stores=EXCLUDED.total_stores,franchise_stores=EXCLUDED.franchise_stores,leased_stores=EXCLUDED.leased_stores,employee_count=EXCLUDED.employee_count,recommended_headcount=EXCLUDED.recommended_headcount,staffing_gap=EXCLUDED.staffing_gap,standard_hours=EXCLUDED.standard_hours,standard_presence_hours=EXCLUDED.standard_presence_hours,standard_to_date_percent=EXCLUDED.standard_to_date_percent,presence_hours=EXCLUDED.presence_hours,attendance_percent=EXCLUDED.attendance_percent,excess_presence_hours=EXCLUDED.excess_presence_hours,overtime_hours=EXCLUDED.overtime_hours,leave_balance=EXCLUDED.leave_balance,leave_used_percent=EXCLUDED.leave_used_percent,health_card_issues=EXCLUDED.health_card_issues,medical_docs_pending=EXCLUDED.medical_docs_pending,no_shift_staff=EXCLUDED.no_shift_staff,source_sheet=EXCLUDED.source_sheet,imported_at=NOW()`,[org.id,x.supervisor,x.period,x.totalStores,x.franchiseStores,x.leasedStores,x.employeeCount,x.recommendedHeadcount,x.staffingGap,x.standardHours,x.standardPresenceHours,x.standardToDatePercent,x.presenceHours,x.attendancePercent,x.excessPresenceHours,x.overtimeHours,x.leaveBalance,x.leaveUsedPercent,x.healthCardIssues,x.medicalDocsPending,x.noShiftStaff,x.sourceSheet]);
+ const stats={employees:employees.size,stores:stores.size,attendance:attendance.size,storeMetrics:storeMetrics.size,supervisors:supervisors.size};await client.query('INSERT INTO report_imports(organization_id,user_id,filename,rows_imported) VALUES($1,$2,$3,$4)',[org.id,req.user.id,req.file.originalname,employees.size+stores.size+attendance.size]);await client.query('INSERT INTO import_batches(organization_id,user_id,filename,detected_sheets,warnings,stats) VALUES($1,$2,$3,$4,$5,$6)',[org.id,req.user.id,req.file.originalname,JSON.stringify(preview.sheetStats),JSON.stringify(preview.warnings),JSON.stringify(stats)]);await client.query('COMMIT');res.json({ok:true,version:'3.4.0',stats,warnings:preview.warnings,sheets:preview.sheetStats});}catch(e){await client.query('ROLLBACK');throw e}finally{client.release()}}
+ catch(e){console.error(e);res.status(500).json({error:'پردازش فایل انجام نشد. قالب گزارش را بررسی کنید.'})}});
 
+async function hrExportData(req){const org=await getHRContext(req,{status:()=>{},json:()=>{}});if(!org)throw new Error('no org');const period=digitsFa(req.query.period||'');const params=period?[org.id,period]:[org.id];const employees=(await q(`SELECT e.personnel_code AS "کد پرسنلی",e.first_name AS "نام",e.last_name AS "نام خانوادگی",e.hire_date AS "تاریخ استخدام",e.job_title AS "سمت",e.system_job_title AS "سمت سیستمی",e.unit_name AS "واحد",e.department_code AS "کد دپارتمان",e.status AS "وضعیت پرسنل",e.province AS "استان",e.region AS "منطقه",e.store_code AS "کد فروشگاه",s.store_name AS "نام فروشگاه",e.supervisor AS "سوپروایزر",e.cooperation_type AS "نوع همکاری",e.gender AS "جنسیت" FROM employees e LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code WHERE e.organization_id=$1 ORDER BY e.personnel_code`,[org.id])).rows;const stores=(await q(`SELECT store_code AS "کد فروشگاه",store_name AS "نام فروشگاه",system_name AS "نام فروشگاه سیستمی",address AS "آدرس فروشگاه",postal_code AS "کد پستی فروشگاه",supervisor AS "سوپروایزر",store_type AS "نوع فروشگاه",status AS "وضعیت فروشگاه",province AS "استان",city AS "شهر",urban_area AS "منطقه شهری",opening_date AS "تاریخ افتتاحیه",manager AS "مدیر فروشگاه",manager_code AS "کد مدیر",chief AS "رئیس",workshop_code AS "کد کارگاهی",phone AS "شماره تماس" FROM stores WHERE organization_id=$1 ORDER BY store_code`,[org.id])).rows;const attendance=(await q(`SELECT a.period AS "دوره",a.personnel_code AS "کد پرسنلی",e.first_name AS "نام",e.last_name AS "نام خانوادگی",e.store_code AS "کد فروشگاه",s.store_name AS "نام فروشگاه",a.standard_hours AS "ساعت استاندارد",a.allowed_hours AS "ساعت مجاز",a.presence_hours AS "ساعت حضور",a.attendance_percent AS "درصد حضور",a.overtime_hours AS "اضافه کار",a.excess_hours AS "ساعت مازاد حضور",a.leave_used_percent AS "درصد مرخصی استفاده شده",a.leave_balance AS "مانده مرخصی",a.health_card_status AS "کارت بهداشت",a.medical_docs_pending AS "مدارک درمانی تحویل نشده",a.insurance_status AS "وضعیت بیمه",a.no_shift_staff AS "پرسنل بدون شیفت" FROM attendance_records a LEFT JOIN employees e ON e.organization_id=a.organization_id AND e.personnel_code=a.personnel_code LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code WHERE a.organization_id=$1${period?' AND a.period=$2':''} ORDER BY a.id DESC`,params)).rows;const metrics=(await q(`SELECT * FROM store_metrics WHERE organization_id=$1${period?' AND period=$2':''} ORDER BY store_code`,params)).rows;const supervisors=(await q(`SELECT * FROM supervisor_summaries WHERE organization_id=$1${period?' AND period=$2':''} ORDER BY supervisor`,params)).rows;return {org,employees,stores,attendance,metrics,supervisors};}
+app.get('/api/hr/export.xlsx',auth,async(req,res)=>{try{const d=await hrExportData(req);const wb=XLSX.utils.book_new();for(const [rows,name] of [[d.employees,'پرسنل'],[d.stores,'فروشگاه‌ها'],[d.attendance,'حضور و غیاب'],[d.metrics,'شاخص فروشگاه'],[d.supervisors,'شاخص سوپروایزر']])XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),name);const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-hr-v3.4.xlsx"`);res.send(buf)}catch(e){console.error(e);res.status(500).json({error:'خروجی Excel آماده نشد.'})}});
+app.get('/api/hr/export.csv',auth,async(req,res)=>{try{const d=await hrExportData(req);const rows=d.attendance;const csv='\ufeff'+XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(rows));res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-attendance-v3.4.csv"`);res.send(csv)}catch(e){console.error(e);res.status(500).json({error:'خروجی CSV آماده نشد.'})}});
 
 app.get('/api/owner/organizations',auth,owner,async(req,res)=>{const r=await q(`SELECT o.id,o.name,o.code,COUNT(m.id)::int hr_count FROM organizations o LEFT JOIN organization_members m ON m.organization_id=o.id AND m.member_role='hr' GROUP BY o.id ORDER BY o.id DESC`);res.json({organizations:r.rows})});
 app.post('/api/owner/organizations',auth,owner,async(req,res)=>{try{const name=String(req.body.name||'').trim(),code=String(req.body.code||'').trim().toUpperCase(),email=normalizeEmail(req.body.hr_email);if(!name||!/^[A-Z0-9_-]{3,32}$/.test(code)||!email)return res.status(400).json({error:'نام سازمان، کد سازمان و ایمیل مدیر منابع انسانی را کامل وارد کنید.'});const u=await q('SELECT id FROM users WHERE email=$1',[email]);if(!u.rowCount)return res.status(404).json({error:'ابتدا حساب کاربری مدیر منابع انسانی را با این ایمیل بسازید.'});const org=await q('INSERT INTO organizations(name,code,created_by) VALUES($1,$2,$3) RETURNING *',[name,code,req.user.id]);await q("UPDATE users SET role='hr' WHERE id=$1",[u.rows[0].id]);await q("INSERT INTO organization_members(organization_id,user_id,member_role) VALUES($1,$2,'hr') ON CONFLICT DO NOTHING",[org.rows[0].id,u.rows[0].id]);res.json({ok:true,organization:org.rows[0]})}catch(e){console.error(e);res.status(500).json({error:'ساخت سازمان انجام نشد؛ ممکن است کد سازمان تکراری باشد.'})}});

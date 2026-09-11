@@ -30,7 +30,6 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 
 // File-processing middleware must be initialized before any route that uses it.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -189,13 +188,25 @@ function auth(req, res, next) {
     res.status(401).json({ error: 'نشست شما منقضی شده است.' });
   }
 }
-function owner(req, res, next) {
-  if (req.user?.role !== 'owner') return res.status(403).json({ error: 'دسترسی مالک لازم است.' });
-  next();
+async function owner(req, res, next) {
+  try {
+    if (!req.user?.id) return res.status(401).json({ error: 'برای ادامه وارد حساب شوید.' });
+    const r = await q('SELECT role,is_active FROM users WHERE id=$1', [req.user.id]);
+    if (!r.rowCount || r.rows[0].is_active === false) return res.status(403).json({ error: 'دسترسی مالک لازم است.' });
+    if (r.rows[0].role !== 'owner') return res.status(403).json({ error: 'دسترسی مالک لازم است.' });
+    req.user.role = 'owner';
+    next();
+  } catch (e) {
+    console.error('owner auth:', e);
+    res.status(500).json({ error: 'بررسی دسترسی مالک انجام نشد.' });
+  }
 }
 function safeUser(u) {
   return { id: u.id, email: u.email, username: u.username, role: u.role, is_active: u.is_active !== false, email_verified: !!u.email_verified, created_at: u.created_at };
 }
+
+app.get('/owner', auth, owner, (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
+app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 async function ownerAudit(req, action, targetType='', targetId='', details={}) {
   try { await q('INSERT INTO owner_audit_logs(owner_user_id,action,target_type,target_id,details) VALUES($1,$2,$3,$4,$5)', [req.user.id, action, targetType || null, targetId ? String(targetId) : null, JSON.stringify(details)]); } catch (e) { console.error('owner audit:', e); }
 }
@@ -424,17 +435,22 @@ async function init() {
 
   if (process.env.OWNER_EMAIL && process.env.OWNER_PASSWORD) {
     const email = normalizeEmail(process.env.OWNER_EMAIL);
-    const existing = await q('SELECT id FROM users WHERE email=$1', [email]);
+    const password = String(process.env.OWNER_PASSWORD);
+    const existing = await q('SELECT id,username FROM users WHERE email=$1', [email]);
+    const hash = await bcrypt.hash(password, 12);
     if (!existing.rowCount) {
-      const hash = await bcrypt.hash(process.env.OWNER_PASSWORD, 12);
-      await q('INSERT INTO users(email,username,password_hash,credits,role,email_verified) VALUES($1,$2,$3,0,$4,true)', [email, 'owner', hash, 'owner']);
+      let username = 'owner';
+      const taken = await q('SELECT 1 FROM users WHERE username=$1', [username]);
+      if (taken.rowCount) username = 'site_owner';
+      await q('INSERT INTO users(email,username,password_hash,credits,role,email_verified,is_active) VALUES($1,$2,$3,0,\'owner\',true,true)', [email, username, hash]);
     } else {
-      await q('UPDATE users SET role=\'owner\', email_verified=true WHERE email=$1', [email]);
+      await q('UPDATE users SET password_hash=$1, role=\'owner\', email_verified=true, is_active=true WHERE email=$2', [hash, email]);
     }
+    console.log(`Owner account synchronized for ${email}`);
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.0', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.1', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -818,7 +834,6 @@ app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
 
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, '../public/dashboard.html')));
 app.get('/hr', (req, res) => res.sendFile(path.join(__dirname, '../public/hr.html')));
-app.get('/owner', (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
 app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 init().then(() => app.listen(PORT, () => console.log(`AmnaYar running on ${PORT}`))).catch(e => { console.error(e); process.exit(1); });

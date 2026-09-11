@@ -501,7 +501,16 @@ async function init() {
     hero_text:'امنا یار نتیجه‌سازی نمی‌کند. خدماتی که امکان بررسی واقعی دارند از مسیر رسمی انجام می‌شوند و ابزارهای داخلی فقط برای اعتبارسنجی ساختاری استفاده می‌شوند.',
     support_email:'amnayar.2026@gmail.com',
     instagram:'https://www.instagram.com/amnayar.2026/',
-    footer_text:'مرکز خدمات، اعتبارسنجی و سامانه‌های رسمی'
+    footer_text:'مرکز خدمات، اعتبارسنجی و سامانه‌های رسمی',
+    home_show_popular:'true',
+    home_show_quick_check:'true',
+    home_show_markets:'true',
+    home_show_tools:'true',
+    home_show_official:'true',
+    home_show_why:'true',
+    home_show_topics:'true',
+    home_show_support:'true',
+    home_section_order:'popular,quick-check,markets,tools,official,why,topics,support'
   };
   for (const [key,value] of Object.entries(defaultSettings)) await q(`INSERT INTO site_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING`,[key,value]);
 
@@ -522,7 +531,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.8', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.9', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -875,7 +884,7 @@ app.get('/api/owner/analytics', auth, owner, async (req,res)=>{
 
 app.get('/api/owner/settings',auth,owner,async(req,res)=>{const r=await q('SELECT key,value,updated_at FROM site_settings ORDER BY key');res.json({settings:r.rows});});
 app.patch('/api/owner/settings',auth,owner,async(req,res)=>{
-  const allowed=['site_title','site_description','hero_badge','hero_title','hero_text','support_email','instagram','footer_text'];
+  const allowed=['site_title','site_description','hero_badge','hero_title','hero_text','support_email','instagram','footer_text','home_show_popular','home_show_quick_check','home_show_markets','home_show_tools','home_show_official','home_show_why','home_show_topics','home_show_support','home_section_order'];
   const entries=Object.entries(req.body||{}).filter(([k,v])=>allowed.includes(k)).map(([k,v])=>[k,String(v??'').slice(0,1000)]);
   for(const [k,v] of entries) await q(`INSERT INTO site_settings(key,value,updated_at,updated_by) VALUES($1,$2,NOW(),$3) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW(),updated_by=EXCLUDED.updated_by`,[k,v,req.user.id]);
   if(entries.length) await ownerAudit(req,'update_site_settings','site','settings',{keys:entries.map(x=>x[0])});
@@ -966,7 +975,7 @@ app.get('/api/owner/audit', auth, owner, async (req,res)=>{
 app.get('/api/owner/system', auth, owner, async (req,res)=>{
   const started=Date.now();
   const db=await q('SELECT NOW() AS now');
-  res.json({ok:true,version:'3.9.8',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
+  res.json({ok:true,version:'3.9.9',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;

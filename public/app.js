@@ -94,10 +94,18 @@ async function loadPublicConfig(){
     const mail=document.querySelector('#support a[href^="mailto:"]'); if(mail&&s.support_email){mail.href='mailto:'+s.support_email;mail.textContent=s.support_email}
     const ig=document.querySelector('#support .support-card a[href*="instagram.com"]'); if(ig&&s.instagram){ig.href=s.instagram}
     const footerSmall=document.querySelector('footer .brand small'); if(footerSmall&&s.footer_text)footerSmall.textContent=s.footer_text;
+    applyHomeLayout(s);
     const enabled=new Set((c.tools||[]).filter(x=>x.enabled).map(x=>x.slug));
     document.querySelectorAll('.tool-tile[href*="/tools.html#"]').forEach(a=>{const slug=(a.getAttribute('href').split('#')[1]||''); if(c.tools?.length)a.style.display=enabled.has(slug)?'':'none';});
     (c.notices||[]).slice(0,1).forEach(n=>{if(!document.getElementById('publicNotice')){const bar=document.createElement('div');bar.id='publicNotice';bar.className='public-notice '+n.type;bar.innerHTML=`<b>${escapeHtml(n.title)}</b><span>${escapeHtml(n.body)}</span>`;document.body.insertBefore(bar,document.body.firstChild)}});
   }catch(e){}
+}
+function applyHomeLayout(settings){
+  const ids=['popular','quick-check','markets','tools','official','why','topics','support'];
+  ids.forEach(id=>{const el=document.getElementById(id); if(!el)return; const key='home_show_'+id.replace(/-/g,'_'); el.style.display=(settings[key]===undefined||settings[key]==='true'||settings[key]===true)?'':'none';});
+  const order=String(settings.home_section_order||'popular,quick-check,markets,tools,official,why,topics,support').split(',').map(x=>x.trim()).filter(x=>ids.includes(x));
+  const main=document.querySelector('main');
+  if(main){order.forEach(id=>{const el=document.getElementById(id); if(el)main.appendChild(el);});}
 }
 function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}
 loadPublicConfig();

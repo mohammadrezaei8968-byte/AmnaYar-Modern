@@ -42,3 +42,7 @@
 .invoice-row{display:grid;grid-template-columns:2fr .7fr 1fr auto;gap:10px;margin:10px 0}.invoice-row input{min-width:0}@media(max-width:700px){.invoice-row{grid-template-columns:1fr}.invoice-row .btn{width:100%}}
 
 .public-notice{max-width:1200px;margin:12px auto 0;padding:12px 16px;border-radius:12px;display:flex;gap:10px;align-items:center;border:1px solid #dfe6ef}.public-notice.info{background:#eef6ff}.public-notice.success{background:#edf9f1}.public-notice.warning{background:#fff8e6}.public-notice.danger{background:#fff0f0}.public-notice span{color:#475467}.public-notice b{white-space:nowrap}@media(max-width:650px){.public-notice{margin:10px 12px;display:block}.public-notice b{display:block;margin-bottom:4px}}
+
+
+/* tool anchor fix */
+.tool-panel{scroll-margin-top:120px;}

@@ -6,7 +6,7 @@ function registerForm(){return `<h2>ثبت‌نام رایگان</h2><p class="m
 async function register(e){e.preventDefault();const r=await api('/api/auth/register','POST',{email:$('#email').value,username:$('#username').value,password:$('#password').value});if(r.error)return alert(r.error);location.href='/dashboard.html'}
 async function login(e){e.preventDefault();const r=await api('/api/auth/login','POST',{identifier:$('#identifier').value,password:$('#password').value});if(r.error)return alert(r.error);location.href=r.user.role==='owner'?'/owner.html':'/dashboard.html'}
 async function api(url,method='GET',body){const r=await fetch(url,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined});return r.json()}
-async function startCheck(kind){const me=await api('/api/me');if(me.error){openAuth('login');return}location.href='/dashboard.html?check='+encodeURIComponent(kind)}
+async function startCheck(kind){location.href='/?check='+encodeURIComponent(kind)+'#quick-check'}
 
 async function loadNavUser(){const box=document.getElementById('navActions');if(!box)return;const me=await api('/api/me');if(me.error)return;box.innerHTML=`<span class="user-chip">${me.user.username}</span><a class="btn soft" href="/dashboard.html">داشبورد</a><button class="btn ghost" onclick="logoutNav()">خروج</button>`}
 async function logoutNav(){await api('/api/auth/logout','POST');location.reload()}
@@ -18,9 +18,9 @@ function calcGold(){const w=+document.getElementById('goldWeight')?.value;const 
 
 // جستجوی داخلی سایت — بدون ارسال متن جستجو به سرور
 const siteSearchItems = [
-  {title:'صحت‌سنجی کد ملی', desc:'بررسی رایگان کد ملی', href:'/dashboard.html?check=national', tags:'کد ملی صحت سنجی اعتبارسنجی'},
-  {title:'صحت‌سنجی کارت بانکی', desc:'بررسی کارت و شناسایی بانک', href:'/dashboard.html?check=card', tags:'کارت بانکی شماره کارت بانک'},
-  {title:'صحت‌سنجی شماره شبا', desc:'بررسی شبا و شناسایی بانک', href:'/dashboard.html?check=iban', tags:'شبا شماره شبا بانک'},
+  {title:'صحت‌سنجی کد ملی', desc:'بررسی رایگان کد ملی', href:'/?check=national#quick-check', tags:'کد ملی صحت سنجی اعتبارسنجی'},
+  {title:'صحت‌سنجی کارت بانکی', desc:'بررسی کارت و شناسایی بانک', href:'/?check=card#quick-check', tags:'کارت بانکی شماره کارت بانک'},
+  {title:'صحت‌سنجی شماره شبا', desc:'بررسی شبا و شناسایی بانک', href:'/?check=iban#quick-check', tags:'شبا شماره شبا بانک'},
   {title:'استعلام بیمه خودرو', desc:'ورود به سامانه رسمی بیمه مرکزی', href:'#popular', tags:'بیمه خودرو بیمه نامه'},
   {title:'استعلام چک صیادی', desc:'سامانه رسمی بانک مرکزی', href:'#popular', tags:'چک صیادی بانک مرکزی'},
   {title:'رهگیری مرسوله پستی', desc:'پیگیری بسته در سامانه پست', href:'#popular', tags:'پست مرسوله رهگیری کد رهگیری'},
@@ -66,6 +66,17 @@ function setupSiteSearch(){
 }
 setupSiteSearch();
 
+// اگر کاربر از جستجو وارد یکی از صحت‌سنجی‌های صفحه اصلی شد، همان بخش را باز و اسکرول می‌کنیم.
+function openHomeCheckFromQuery(){
+  const kind=new URLSearchParams(location.search).get('check');
+  if(!kind || !homeCheckConfig?.[kind]) return;
+  const btn=document.querySelector(`.home-check-card[onclick*="'${kind}'"]`);
+  if(btn) openHomeCheck(kind,btn);
+  const section=document.getElementById('quick-check');
+  if(section) setTimeout(()=>section.scrollIntoView({behavior:'auto',block:'start'}),80);
+  history.replaceState({},'',location.pathname+'#quick-check');
+}
+
 
 // صحت‌سنجی سریع صفحه اصلی؛ ورودی‌ها فقط داخل مرورگر بررسی می‌شوند.
 const homeBankCodes={
@@ -110,3 +121,6 @@ function applyHomeLayout(settings){
 function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}
 loadPublicConfig();
 document.addEventListener('click',e=>{const a=e.target.closest('a[href*="/tools.html?tool="]');if(a){const slug=(new URL(a.href,location.origin)).searchParams.get('tool')||'';fetch('/api/analytics/tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}).catch(()=>{})}});
+
+
+if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',openHomeCheckFromQuery)}else{setTimeout(openHomeCheckFromQuery,0)}

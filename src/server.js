@@ -286,7 +286,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.4.0', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.6.1', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -439,6 +439,39 @@ function ibanDetails(input) {
     accountNumber: normalized.slice(7)
   };
 }
+
+
+// Public market snapshot proxy. Prices are fetched from TGJU at request time.
+const MARKET_PROFILES = {
+  gold18: 'https://www.tgju.org/profile/geram18',
+  dollar: 'https://www.tgju.org/profile/price_dollar_rl',
+  euro: 'https://www.tgju.org/profile/price_eur',
+  pound: 'https://www.tgju.org/profile/price_gbp',
+  sekee: 'https://www.tgju.org/profile/sekee'
+};
+async function fetchTgjuCurrent(url) {
+  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 AmnaYar/3.6' } });
+  if (!r.ok) throw new Error(`TGJU ${r.status}`);
+  const html = await r.text();
+  const m = html.match(/نرخ\s*فعلی\s*[:：]+\s*([0-9۰-۹,]+)/);
+  if (!m) throw new Error('TGJU current price not found');
+  const raw = m[1].replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/,/g,'');
+  const value = Number(raw);
+  if (!Number.isFinite(value)) throw new Error('TGJU price invalid');
+  return value;
+}
+app.get('/api/market', async (req,res) => {
+  try {
+    const entries = await Promise.all(Object.entries(MARKET_PROFILES).map(async ([key,url]) => {
+      try { return [key, await fetchTgjuCurrent(url)]; } catch { return [key, null]; }
+    }));
+    const data = Object.fromEntries(entries);
+    const available = Object.values(data).some(v => Number.isFinite(v));
+    if (!available) return res.status(503).json({ error:'قیمت بازار فعلاً در دسترس نیست.' });
+    res.set('Cache-Control','public, max-age=20, stale-while-revalidate=40');
+    res.json({ source:'TGJU', fetchedAt:new Date().toISOString(), data });
+  } catch (e) { res.status(503).json({ error:'قیمت بازار فعلاً در دسترس نیست.' }); }
+});
 
 app.post('/api/check', auth, async (req, res) => {
   try {

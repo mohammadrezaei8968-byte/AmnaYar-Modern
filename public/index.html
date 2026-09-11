@@ -2,10 +2,11 @@
 <header class="nav"><a class="brand" href="/"><img src="/assets/logo-amnayar.png" alt="امنا یار"><span>امنا یار<small>استعلام واقعی • سامانه رسمی • ابزار رایگان</small></span></a><nav><a href="#popular">محبوب‌ترین‌ها</a><a href="#tools">ابزارها</a><a href="#markets">بازار آنلاین</a><a href="#tools">ابزارهای رایگان</a><a href="#official">سامانه‌های رسمی</a><a href="#why">چرا امنا یار؟</a></nav><div class="nav-actions" id="navActions"><button class="btn ghost" onclick="openAuth('login')">ورود</button><button class="btn primary" onclick="openAuth('register')">ثبت‌نام رایگان</button></div></header>
 <section class="top-market-bar" aria-label="قیمت آنلاین طلا و ارز">
   <div class="top-market-inner">
-    <div class="top-market-title"><span class="live-dot">●</span><div><b>بازار آنلاین</b><small>قیمت‌های نمایش‌داده‌شده از منبع بازار</small></div></div>
-    <div class="top-market-card"><span class="top-market-label">طلا و سکه</span><tgju type="market-data" items="geram18,sekke_emami" columns="dot,diff,time" token="webservice"></tgju></div>
-    <div class="top-market-card"><span class="top-market-label">ارز</span><tgju type="market-data" items="price_dollar_rl,price_eur,price_gbp" columns="dot,diff,time" token="webservice"></tgju></div>
-    <a class="top-market-more" href="#markets">مشاهده همه بازارها ↗</a>
+    <div class="top-market-title"><span class="live-dot">●</span><div><b>بازار آنلاین</b><small>نرخ آنلاین از منبع بازار</small></div></div>
+    <div class="top-price-card"><span>طلای ۱۸</span><b id="topGold">در حال دریافت…</b><small>ریال / گرم</small></div>
+    <div class="top-price-card"><span>دلار</span><b id="topDollar">در حال دریافت…</b><small>ریال</small></div>
+    <div class="top-price-card"><span>یورو</span><b id="topEuro">در حال دریافت…</b><small>ریال</small></div>
+    <a class="top-market-more" href="#markets">همه بازارها ↗</a>
   </div>
 </section>
 <main>
@@ -18,17 +19,27 @@
 <article class="popular-card gov"><div class="service-icon">🏛️</div><div><span class="service-tag official">دولت هوشمند</span><h3>پنجره ملی خدمات دولت</h3><p>دسترسی به مجموعه بزرگی از خدمات دولتی و احراز هویت‌های رسمی.</p><a class="btn primary" href="https://my.gov.ir/" target="_blank" rel="noopener">ورود به دولت من</a></div></article>
 </div></section>
 
-
-
+<section id="validators" class="section validator-section">
+<div class="heading"><span>رایگان و فوری</span><h2>صحت‌سنجی کد ملی، کارت بانکی و شبا</h2><p>این سه بررسی داخل مرورگر انجام می‌شوند و هیچ شماره‌ای به سرور امنا یار ارسال نمی‌شود.</p></div>
+<div class="validator-grid">
+<button class="validator-card" onclick="openPublicValidator('national')"><b>کد ملی</b><small>بررسی ۱۰ رقم و رقم کنترل</small><span>بررسی رایگان ←</span></button>
+<button class="validator-card" onclick="openPublicValidator('card')"><b>کارت بانکی</b><small>بررسی ۱۶ رقم و الگوریتم Luhn</small><span>بررسی رایگان ←</span></button>
+<button class="validator-card" onclick="openPublicValidator('iban')"><b>شماره شبا</b><small>بررسی IR و کنترل MOD-97</small><span>بررسی رایگان ←</span></button>
+</div>
+<div id="publicValidatorBox" class="public-validator panel hidden">
+<div class="section-title-row"><div><span class="eyebrow">اعتبارسنجی داخلی</span><h3 id="pvTitle">کد ملی</h3></div><button class="btn ghost" onclick="closePublicValidator()">بستن</button></div>
+<form onsubmit="runPublicValidator(event)"><input id="pvInput" inputmode="numeric" autocomplete="off" placeholder="ورودی را وارد کنید" required><button class="btn primary" type="submit">صحت‌سنجی</button></form><div id="pvResult" class="result-box hidden"></div>
+</div>
+</section>
 
 <section id="markets" class="section market-section">
 <div class="heading"><span>آنلاین بازار</span><h2>قیمت‌های روز بازار</h2><p>طلا، سکه، ارز، رمزارز و شاخص‌ها را رایگان ببینید. قیمت‌ها از منبع بازار نمایش داده می‌شوند.</p></div>
 <div class="market-tabs"><button class="market-tab active" onclick="showMarket('gold')">طلا و سکه</button><button class="market-tab" onclick="showMarket('currency')">ارز</button><button class="market-tab" onclick="showMarket('crypto')">رمزارز</button><button class="market-tab" onclick="showMarket('global')">بازار جهانی</button></div>
-<div id="marketGold" class="market-widget"><tgju type="market-data" items="geram18,sekke_emami,sekke_bahar,sekke_nim,sekke_rob,tgold" columns="dot,diff,low,high,time" token="webservice"></tgju></div>
+<div id="marketGold" class="market-widget"><tgju type="market-data" items="geram18,geram24,mesghal,sekee,ons" columns="dot,diff,low,high,time" token="webservice"></tgju></div>
 <div id="marketCurrency" class="market-widget hidden"><tgju type="market-data" items="price_dollar_rl,price_eur,price_gbp,price_aed,price_try,price_cny" columns="dot,diff,low,high,time" token="webservice"></tgju></div>
 <div id="marketCrypto" class="market-widget hidden"><tgju type="market-data" items="bitcoin,ethereum,tether,solana" columns="dot,diff,low,high,time" token="webservice"></tgju></div>
-<div id="marketGlobal" class="market-widget hidden"><tgju type="market-data" items="gold,brent_oil,snp500,nasdaq" columns="dot,diff,low,high,time" token="webservice"></tgju></div>
-<div class="gold-calculator panel"><div><span class="eyebrow">محاسبه‌گر طلا</span><h3>ارزش تقریبی طلای شما</h3><p class="muted">وزن و عیار را وارد کنید. قیمت مرجع بازار به‌صورت آنلاین نمایش داده می‌شود.</p></div><div class="gold-form"><input id="goldWeight" type="number" min="0" step="0.001" placeholder="وزن (گرم)"><select id="goldKarat"><option value="18">طلای ۱۸ عیار</option><option value="24">طلای ۲۴ عیار</option><option value="750">۷۵۰</option></select><button class="btn primary" onclick="calcGold()">محاسبه</button></div><div id="goldResult" class="gold-result">وزن را وارد کنید.</div><small class="muted">قیمت خرید و فروش واقعی طلافروش ممکن است با قیمت مرجع بازار، اجرت، مالیات و حاشیه خرید/فروش متفاوت باشد.</small></div>
+<div id="marketGlobal" class="market-widget hidden"><tgju type="market-data" items="ons,oil_opec,bourse,bitcoin" columns="dot,diff,low,high,time" token="webservice"></tgju></div>
+<div class="gold-calculator panel"><div><span class="eyebrow">محاسبه‌گر طلا</span><h3>ارزش طلا + برآورد خرید و فروش</h3><p class="muted">قیمت مرجع ۱۸ عیار آنلاین دریافت می‌شود. درصد خرید/فروش را خودتان تنظیم کنید.</p></div><div class="gold-form"><input id="goldWeight" type="number" min="0" step="0.001" placeholder="وزن (گرم)"><select id="goldKarat"><option value="18">طلای ۱۸ عیار</option><option value="24">طلای ۲۴ عیار</option></select><input id="goldBuySpread" type="number" min="0" step="0.1" value="3" placeholder="کسر خرید %"><input id="goldSellSpread" type="number" min="0" step="0.1" value="3" placeholder="افزایش فروش %"><button class="btn primary" onclick="calcGold()">محاسبه آنلاین</button></div><div id="goldResult" class="gold-result">در حال دریافت قیمت آنلاین...</div><small class="muted">نرخ خرید/فروش طلافروش واحد و ثابت نیست؛ این دو عدد فقط «برآورد» بر اساس درصد انتخابی شما هستند. اجرت، مالیات و سود مصنوعات جداگانه محاسبه می‌شوند.</small></div>
 </section>
 <section id="tools" class="section tools-section"><div class="heading"><span>ابزارهای رایگان</span><h2>ابزارهایی که واقعاً کار می‌کنند</h2><p>ابزارهای پردازش فایل و متن تا حد امکان داخل مرورگر انجام می‌شوند و نیاز به خرید اعتبار ندارند.</p></div><div class="tool-grid">
 <a class="tool-tile" href="/tools.html#pdf"><b>📄</b><strong>ادغام و جداسازی PDF</strong><small>چند PDF را یکی کنید یا صفحات را جدا کنید</small></a>

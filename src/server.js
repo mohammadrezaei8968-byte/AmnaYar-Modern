@@ -30,6 +30,7 @@ app.use(helmet({ contentSecurityPolicy: false }));
 app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 
 // File-processing middleware must be initialized before any route that uses it.
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
@@ -188,25 +189,13 @@ function auth(req, res, next) {
     res.status(401).json({ error: 'نشست شما منقضی شده است.' });
   }
 }
-async function owner(req, res, next) {
-  try {
-    if (!req.user?.id) return res.status(401).json({ error: 'برای ادامه وارد حساب شوید.' });
-    const r = await q('SELECT role,is_active FROM users WHERE id=$1', [req.user.id]);
-    if (!r.rowCount || r.rows[0].is_active === false) return res.status(403).json({ error: 'دسترسی مالک لازم است.' });
-    if (r.rows[0].role !== 'owner') return res.status(403).json({ error: 'دسترسی مالک لازم است.' });
-    req.user.role = 'owner';
-    next();
-  } catch (e) {
-    console.error('owner auth:', e);
-    res.status(500).json({ error: 'بررسی دسترسی مالک انجام نشد.' });
-  }
+function owner(req, res, next) {
+  if (req.user?.role !== 'owner') return res.status(403).json({ error: 'دسترسی مالک لازم است.' });
+  next();
 }
 function safeUser(u) {
   return { id: u.id, email: u.email, username: u.username, role: u.role, is_active: u.is_active !== false, email_verified: !!u.email_verified, created_at: u.created_at };
 }
-
-app.get('/owner', auth, owner, (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
-app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 async function ownerAudit(req, action, targetType='', targetId='', details={}) {
   try { await q('INSERT INTO owner_audit_logs(owner_user_id,action,target_type,target_id,details) VALUES($1,$2,$3,$4,$5)', [req.user.id, action, targetType || null, targetId ? String(targetId) : null, JSON.stringify(details)]); } catch (e) { console.error('owner audit:', e); }
 }
@@ -431,89 +420,21 @@ async function init() {
     result TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
-  await q(`CREATE TABLE IF NOT EXISTS page_views(
-    id BIGSERIAL PRIMARY KEY,
-    path TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
-  await q(`CREATE TABLE IF NOT EXISTS tool_usage(
-    id BIGSERIAL PRIMARY KEY,
-    tool_slug TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
-  await q(`CREATE TABLE IF NOT EXISTS site_settings(
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL DEFAULT '',
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL
-  )`);
-  await q(`CREATE TABLE IF NOT EXISTS site_notices(
-    id BIGSERIAL PRIMARY KEY,
-    title TEXT NOT NULL,
-    body TEXT NOT NULL,
-    type TEXT NOT NULL DEFAULT 'info' CHECK(type IN ('info','success','warning','danger')),
-    is_active BOOLEAN NOT NULL DEFAULT TRUE,
-    starts_at TIMESTAMPTZ,
-    ends_at TIMESTAMPTZ,
-    created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-  )`);
-  await q(`CREATE TABLE IF NOT EXISTS tool_settings(
-    slug TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    enabled BOOLEAN NOT NULL DEFAULT TRUE,
-    sort_order INTEGER NOT NULL DEFAULT 100,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL
-  )`);
-  const defaultTools = [
-    ['car','محاسبه‌گر خودرو','قیمت بازار، کارخانه و سود یا زیان',true,10],
-    ['gold','محاسبه‌گر طلا و سکه','خرید، فروش، اجرت و ارزش سکه',true,20],
-    ['currency','محاسبه‌گر ارز','تبدیل ارز و سود یا زیان',true,30],
-    ['rent','محاسبه‌گر رهن و اجاره','تبدیل سریع رهن و اجاره',true,40],
-    ['invoice','فاکتور‌ساز فارسی','ساخت فاکتور PDF رایگان',true,50],
-    ['pdf','ادغام و جداسازی PDF','چند PDF را یکی کنید یا صفحات را جدا کنید',true,60],
-    ['date','تبدیل تاریخ','شمسی و میلادی',true,70],
-    ['calculator','محاسبات روزمره','درصد، تخفیف و اضافه‌کاری',true,80],
-    ['text','ابزار متن','شمارش، پاکسازی و تبدیل اعداد',true,90],
-    ['image','ابزار تصویر','تغییر اندازه و پردازش تصویر',true,100],
-    ['translate','ترجمه فارسی و انگلیسی','ترجمه رایگان فارسی ↔ انگلیسی',true,110],
-    ['compress','کم‌حجم‌کردن فایل','تصویر، PDF و فیلم',true,120],
-  ]
-  for (const [slug,name,description,enabled,sort_order] of defaultTools) {
-    await q(`INSERT INTO tool_settings(slug,name,description,enabled,sort_order) VALUES($1,$2,$3,$4,$5) ON CONFLICT(slug) DO NOTHING`, [slug,name,description,enabled,sort_order]);
-  }
-  const defaultSettings = {
-    site_title:'امنا یار | مرکز استعلام و خدمات آنلاین',
-    site_description:'امنا یار؛ مرکز خدمات کاربردی، اعتبارسنجی و دسترسی سریع به سامانه‌های رسمی ایران.',
-    hero_badge:'مرکز خدمات آنلاین امنا یار',
-    hero_title:'قبل از معامله، خرید یا پیگیری\nاستعلام درست بگیرید.',
-    hero_text:'امنا یار نتیجه‌سازی نمی‌کند. خدماتی که امکان بررسی واقعی دارند از مسیر رسمی انجام می‌شوند و ابزارهای داخلی فقط برای اعتبارسنجی ساختاری استفاده می‌شوند.',
-    support_email:'amnayar.2026@gmail.com',
-    instagram:'https://www.instagram.com/amnayar.2026/',
-    footer_text:'مرکز خدمات، اعتبارسنجی و سامانه‌های رسمی'
-  };
-  for (const [key,value] of Object.entries(defaultSettings)) await q(`INSERT INTO site_settings(key,value) VALUES($1,$2) ON CONFLICT(key) DO NOTHING`,[key,value]);
+
 
   if (process.env.OWNER_EMAIL && process.env.OWNER_PASSWORD) {
     const email = normalizeEmail(process.env.OWNER_EMAIL);
-    const password = String(process.env.OWNER_PASSWORD);
-    const existing = await q('SELECT id,username FROM users WHERE email=$1', [email]);
-    const hash = await bcrypt.hash(password, 12);
+    const existing = await q('SELECT id FROM users WHERE email=$1', [email]);
     if (!existing.rowCount) {
-      let username = 'owner';
-      const taken = await q('SELECT 1 FROM users WHERE username=$1', [username]);
-      if (taken.rowCount) username = 'site_owner';
-      await q('INSERT INTO users(email,username,password_hash,credits,role,email_verified,is_active) VALUES($1,$2,$3,0,\'owner\',true,true)', [email, username, hash]);
+      const hash = await bcrypt.hash(process.env.OWNER_PASSWORD, 12);
+      await q('INSERT INTO users(email,username,password_hash,credits,role,email_verified) VALUES($1,$2,$3,0,$4,true)', [email, 'owner', hash, 'owner']);
     } else {
-      await q('UPDATE users SET password_hash=$1, role=\'owner\', email_verified=true, is_active=true WHERE email=$2', [hash, email]);
+      await q('UPDATE users SET role=\'owner\', email_verified=true WHERE email=$1', [email]);
     }
-    console.log(`Owner account synchronized for ${email}`);
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.1', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.0', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -830,49 +751,6 @@ async function hrExportData(req){const org=await getHRContext(req,{status:()=>{}
 app.get('/api/hr/export.xlsx',auth,async(req,res)=>{try{const d=await hrExportData(req);const wb=XLSX.utils.book_new();for(const [rows,name] of [[d.employees,'پرسنل'],[d.stores,'فروشگاه‌ها'],[d.attendance,'حضور و غیاب'],[d.metrics,'شاخص فروشگاه'],[d.supervisors,'شاخص سوپروایزر']])XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(rows),name);const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-hr-v3.4.xlsx"`);res.send(buf)}catch(e){console.error(e);res.status(500).json({error:'خروجی Excel آماده نشد.'})}});
 app.get('/api/hr/export.csv',auth,async(req,res)=>{try{const d=await hrExportData(req);const rows=d.attendance;const csv='\ufeff'+XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(rows));res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-attendance-v3.4.csv"`);res.send(csv)}catch(e){console.error(e);res.status(500).json({error:'خروجی CSV آماده نشد.'})}});
 
-app.get('/api/public-config', async (req,res) => {
-  try {
-    const [settings, tools, notices] = await Promise.all([
-      q('SELECT key,value FROM site_settings'),
-      q('SELECT slug,name,description,enabled,sort_order FROM tool_settings ORDER BY sort_order,slug'),
-      q(`SELECT id,title,body,type FROM site_notices WHERE is_active=true AND (starts_at IS NULL OR starts_at<=NOW()) AND (ends_at IS NULL OR ends_at>=NOW()) ORDER BY id DESC LIMIT 3`)
-    ]);
-    res.json({settings:Object.fromEntries(settings.rows.map(x=>[x.key,x.value])),tools:tools.rows,notices:notices.rows});
-  } catch(e) { res.json({settings:{},tools:[],notices:[]}); }
-});
-app.post('/api/analytics/tool', async (req,res) => {
-  const slug=String(req.body?.slug||'').trim().slice(0,80);
-  if(slug) await q('INSERT INTO tool_usage(tool_slug) VALUES($1)',[slug]).catch(()=>{});
-  res.json({ok:true});
-});
-
-app.get('/api/owner/analytics', auth, owner, async (req,res)=>{
-  try {
-    const [days,paths,tools] = await Promise.all([
-      q(`SELECT TO_CHAR(created_at AT TIME ZONE 'Asia/Tehran','YYYY-MM-DD') day,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY 1 ORDER BY 1`),
-      q(`SELECT path,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY path ORDER BY views DESC LIMIT 12`),
-      q(`SELECT tool_slug,COUNT(*)::int uses FROM tool_usage WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY tool_slug ORDER BY uses DESC LIMIT 12`)
-    ]);
-    res.json({days:days.rows,paths:paths.rows,tools:tools.rows});
-  } catch(e) { console.error(e); res.status(500).json({error:'دریافت آمار انجام نشد.'}); }
-});
-
-app.get('/api/owner/settings',auth,owner,async(req,res)=>{const r=await q('SELECT key,value,updated_at FROM site_settings ORDER BY key');res.json({settings:r.rows});});
-app.patch('/api/owner/settings',auth,owner,async(req,res)=>{
-  const allowed=['site_title','site_description','hero_badge','hero_title','hero_text','support_email','instagram','footer_text'];
-  const entries=Object.entries(req.body||{}).filter(([k,v])=>allowed.includes(k)).map(([k,v])=>[k,String(v??'').slice(0,1000)]);
-  for(const [k,v] of entries) await q(`INSERT INTO site_settings(key,value,updated_at,updated_by) VALUES($1,$2,NOW(),$3) ON CONFLICT(key) DO UPDATE SET value=EXCLUDED.value,updated_at=NOW(),updated_by=EXCLUDED.updated_by`,[k,v,req.user.id]);
-  if(entries.length) await ownerAudit(req,'update_site_settings','site','settings',{keys:entries.map(x=>x[0])});
-  res.json({ok:true});
-});
-app.get('/api/owner/notices',auth,owner,async(req,res)=>{const r=await q('SELECT id,title,body,type,is_active,starts_at,ends_at,created_at FROM site_notices ORDER BY id DESC LIMIT 100');res.json({notices:r.rows});});
-app.post('/api/owner/notices',auth,owner,async(req,res)=>{const title=String(req.body?.title||'').trim().slice(0,160),body=String(req.body?.body||'').trim().slice(0,1000),type=['info','success','warning','danger'].includes(req.body?.type)?req.body.type:'info';if(!title||!body)return res.status(400).json({error:'عنوان و متن اطلاعیه را وارد کنید.'});const r=await q('INSERT INTO site_notices(title,body,type,created_by) VALUES($1,$2,$3,$4) RETURNING *',[title,body,type,req.user.id]);await ownerAudit(req,'create_notice','notice',r.rows[0].id,{title,type});res.json({ok:true,notice:r.rows[0]});});
-app.patch('/api/owner/notices/:id',auth,owner,async(req,res)=>{const id=Number(req.params.id);const r=await q('UPDATE site_notices SET is_active=COALESCE($1,is_active) WHERE id=$2 RETURNING *',[typeof req.body?.is_active==='boolean'?req.body.is_active:null,id]);if(!r.rowCount)return res.status(404).json({error:'اطلاعیه پیدا نشد.'});await ownerAudit(req,'toggle_notice','notice',id,{is_active:r.rows[0].is_active});res.json({ok:true,notice:r.rows[0]});});
-app.delete('/api/owner/notices/:id',auth,owner,async(req,res)=>{const id=Number(req.params.id);const r=await q('DELETE FROM site_notices WHERE id=$1 RETURNING id',[id]);if(!r.rowCount)return res.status(404).json({error:'اطلاعیه پیدا نشد.'});await ownerAudit(req,'delete_notice','notice',id,{});res.json({ok:true});});
-app.get('/api/owner/tools',auth,owner,async(req,res)=>{const r=await q('SELECT slug,name,description,enabled,sort_order FROM tool_settings ORDER BY sort_order,slug');res.json({tools:r.rows});});
-app.patch('/api/owner/tools/:slug',auth,owner,async(req,res)=>{const slug=String(req.params.slug||'').trim();if(typeof req.body?.enabled!=='boolean')return res.status(400).json({error:'وضعیت ابزار نامعتبر است.'});const r=await q('UPDATE tool_settings SET enabled=$1,updated_at=NOW(),updated_by=$2 WHERE slug=$3 RETURNING *',[req.body.enabled,req.user.id,slug]);if(!r.rowCount)return res.status(404).json({error:'ابزار پیدا نشد.'});await ownerAudit(req,'toggle_tool','tool',slug,{enabled:req.body.enabled});res.json({ok:true,tool:r.rows[0]});});
-app.get('/api/owner/admins',auth,owner,async(req,res)=>{const r=await q("SELECT id,email,username,role,is_active,email_verified,created_at FROM users WHERE role IN ('owner','hr') ORDER BY CASE WHEN role='owner' THEN 0 ELSE 1 END,id DESC");res.json({admins:r.rows});});
-
 app.get('/api/owner/organizations',auth,owner,async(req,res)=>{const r=await q(`SELECT o.id,o.name,o.code,COUNT(m.id)::int hr_count FROM organizations o LEFT JOIN organization_members m ON m.organization_id=o.id AND m.member_role='hr' GROUP BY o.id ORDER BY o.id DESC`);res.json({organizations:r.rows})});
 app.post('/api/owner/organizations',auth,owner,async(req,res)=>{try{const name=String(req.body.name||'').trim(),code=String(req.body.code||'').trim().toUpperCase(),email=normalizeEmail(req.body.hr_email);if(!name||!/^[A-Z0-9_-]{3,32}$/.test(code)||!email)return res.status(400).json({error:'نام سازمان، کد سازمان و ایمیل مدیر منابع انسانی را کامل وارد کنید.'});const u=await q('SELECT id FROM users WHERE email=$1',[email]);if(!u.rowCount)return res.status(404).json({error:'ابتدا حساب کاربری مدیر منابع انسانی را با این ایمیل بسازید.'});const org=await q('INSERT INTO organizations(name,code,created_by) VALUES($1,$2,$3) RETURNING *',[name,code,req.user.id]);await q("UPDATE users SET role='hr' WHERE id=$1",[u.rows[0].id]);await q("INSERT INTO organization_members(organization_id,user_id,member_role) VALUES($1,$2,'hr') ON CONFLICT DO NOTHING",[org.rows[0].id,u.rows[0].id]);res.json({ok:true,organization:org.rows[0]})}catch(e){console.error(e);res.status(500).json({error:'ساخت سازمان انجام نشد؛ ممکن است کد سازمان تکراری باشد.'})}});
 app.get('/api/owner/stats', auth, owner, async (req, res) => {
@@ -924,7 +802,7 @@ app.get('/api/owner/audit', auth, owner, async (req,res)=>{
 app.get('/api/owner/system', auth, owner, async (req,res)=>{
   const started=Date.now();
   const db=await q('SELECT NOW() AS now');
-  res.json({ok:true,version:'3.9.2',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
+  res.json({ok:true,version:'3.9.0',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;
@@ -940,6 +818,7 @@ app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
 
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, '../public/dashboard.html')));
 app.get('/hr', (req, res) => res.sendFile(path.join(__dirname, '../public/hr.html')));
+app.get('/owner', (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
 app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 init().then(() => app.listen(PORT, () => console.log(`AmnaYar running on ${PORT}`))).catch(e => { console.error(e); process.exit(1); });

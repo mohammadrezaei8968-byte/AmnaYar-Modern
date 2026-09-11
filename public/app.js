@@ -80,3 +80,25 @@ function homeIban(s){if(!/^IR\d{24}$/.test(s))return false;const moved=s.slice(4
 function openHomeCheck(kind,btn){homeCheckKind=kind;document.querySelectorAll('.home-check-card').forEach(x=>x.classList.remove('active'));btn.classList.add('active');const c=homeCheckConfig[kind];const label=document.getElementById('homeCheckLabel');const input=document.getElementById('homeCheckInput');label.firstChild.textContent=c.label;input.placeholder=c.placeholder;input.inputMode=c.mode;input.value='';document.getElementById('homeCheckResult').className='result-box hidden';input.focus()}
 function homeResult(ok,title,detail=''){const box=document.getElementById('homeCheckResult');box.className='result-box '+(ok?'success':'danger');box.innerHTML=`<div class="result-icon">${ok?'✓':'!'}</div><div><strong>${title}</strong>${detail?`<p>${detail}</p>`:''}</div>`;box.classList.remove('hidden')}
 function submitHomeCheck(e){e.preventDefault();const v=homeNormalize(document.getElementById('homeCheckInput').value);if(!v)return homeResult(false,'مقدار را وارد کنید.');let ok=false,detail='';if(homeCheckKind==='national'){ok=homeNational(v)}else if(homeCheckKind==='card'){ok=/^\d{16}$/.test(v)&&homeLuhn(v);if(ok)detail=`بانک: ${homeCardBanks[v.slice(0,6)]||'بانک از روی شماره کارت شناسایی نشد'}`}else{ok=homeIban(v);if(ok){const code=v.slice(4,7);detail=`بانک: ${homeBankCodes[code]||'بانک از روی شماره شبا شناسایی نشد'}`}}homeResult(ok,ok?'صحیح است':'نامعتبر است',detail)}
+
+
+// مالک سایت می‌تواند محتوای عمومی و ابزارهای فعال را بدون Deploy تغییر دهد.
+async function loadPublicConfig(){
+  try{
+    const r=await fetch('/api/public-config'); if(!r.ok)return; const c=await r.json(); const s=c.settings||{};
+    if(s.site_title) document.title=s.site_title;
+    const desc=document.querySelector('meta[name="description"]'); if(desc&&s.site_description)desc.content=s.site_description;
+    const badge=document.querySelector('.hero-copy .pill'); if(badge&&s.hero_badge)badge.textContent=s.hero_badge;
+    const h=document.querySelector('.hero-copy h1'); if(h&&s.hero_title){const parts=s.hero_title.split('\n');h.innerHTML=parts.map((x,i)=>i===parts.length-1?`<strong>${x}</strong>`:x).join('<br>')}
+    const hp=document.querySelector('.hero-copy > p'); if(hp&&s.hero_text)hp.textContent=s.hero_text;
+    const mail=document.querySelector('#support a[href^="mailto:"]'); if(mail&&s.support_email){mail.href='mailto:'+s.support_email;mail.textContent=s.support_email}
+    const ig=document.querySelector('#support .support-card a[href*="instagram.com"]'); if(ig&&s.instagram){ig.href=s.instagram}
+    const footerSmall=document.querySelector('footer .brand small'); if(footerSmall&&s.footer_text)footerSmall.textContent=s.footer_text;
+    const enabled=new Set((c.tools||[]).filter(x=>x.enabled).map(x=>x.slug));
+    document.querySelectorAll('.tool-tile[href*="/tools.html#"]').forEach(a=>{const slug=(a.getAttribute('href').split('#')[1]||''); if(c.tools?.length)a.style.display=enabled.has(slug)?'':'none';});
+    (c.notices||[]).slice(0,1).forEach(n=>{if(!document.getElementById('publicNotice')){const bar=document.createElement('div');bar.id='publicNotice';bar.className='public-notice '+n.type;bar.innerHTML=`<b>${escapeHtml(n.title)}</b><span>${escapeHtml(n.body)}</span>`;document.body.insertBefore(bar,document.body.firstChild)}});
+  }catch(e){}
+}
+function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}
+loadPublicConfig();
+document.addEventListener('click',e=>{const a=e.target.closest('a[href*="/tools.html#"]');if(a){const slug=a.getAttribute('href').split('#')[1];fetch('/api/analytics/tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}).catch(()=>{})}});

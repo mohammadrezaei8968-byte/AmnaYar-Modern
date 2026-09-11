@@ -14,11 +14,61 @@ function b64e(){try{$('#encodeResult').textContent=btoa(unescape(encodeURICompon
 function resizeImage(){const f=$('#imgFile').files[0],w=+$('#imgW').value,h=+$('#imgH').value;if(!f||!w||!h)return $('#imgStatus').textContent='فایل و ابعاد را وارد کنید.';const im=new Image();im.onload=()=>{const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(im,0,0,w,h);c.toBlob(b=>download(b,'amnayar-image.png','image/png'),'image/png');URL.revokeObjectURL(im.src);$('#imgStatus').textContent='تصویر آماده شد.'};im.src=URL.createObjectURL(f)}
 
 function fmtBytes(n){if(!Number.isFinite(n))return '';const u=['بایت','کیلوبایت','مگابایت','گیگابایت'];let i=0;let x=n;while(x>=1024&&i<u.length-1){x/=1024;i++;}return `${x.toLocaleString('fa-IR',{maximumFractionDigits:2})} ${u[i]}`}
-function savingsText(a,b){if(!a||!b)return '';const pct=Math.max(0,(1-b/a)*100);return `حجم اولیه: ${fmtBytes(a)} — حجم جدید: ${fmtBytes(b)} — کاهش: ${pct.toLocaleString('fa-IR',{maximumFractionDigits:1})}%`}
-function wireDownloadResponse(r,fallback){const cd=r.headers.get('Content-Disposition')||'';const m=cd.match(/filename="([^"]+)"/);return r.blob().then(blob=>({blob,name:m?.[1]||fallback,original:Number(r.headers.get('X-Original-Bytes')||0),output:Number(r.headers.get('X-Output-Bytes')||blob.size)}))}
-async function postCompression(url,file,fields,statusId,fallback){const fd=new FormData();fd.append('file',file);Object.entries(fields||{}).forEach(([k,v])=>fd.append(k,v));let r;try{r=await fetch(url,{method:'POST',body:fd})}catch(e){throw new Error('ارتباط با سرویس پردازش برقرار نشد؛ سرویس را دوباره امتحان کنید.')}if(!r.ok){let msg='عملیات انجام نشد.';try{const j=await r.json();msg=j.error||msg}catch{}throw new Error(msg)}const data=await wireDownloadResponse(r,fallback);downloadBlob(data.blob,data.name);$(statusId).textContent=savingsText(data.original,data.output)||'فایل آماده شد.';}
+function savingsText(a,b){if(!a||!b)return '';const pct=(1-b/a)*100;if(pct<=0)return `حجم اولیه: ${fmtBytes(a)} — حجم خروجی: ${fmtBytes(b)} — این فایل از قبل بهینه است.`;return `حجم اولیه: ${fmtBytes(a)} — حجم جدید: ${fmtBytes(b)} — کاهش: ${pct.toLocaleString('fa-IR',{maximumFractionDigits:1})}%`}
 function downloadBlob(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1500)}
 $('#imageQuality')?.addEventListener('input',e=>$('#imageQualityValue').textContent=e.target.value);
-async function compressImage(){const f=$('#compressImageFile').files[0],s=$('#compressImageStatus');if(!f)return s.textContent='تصویر را انتخاب کنید.';s.textContent='در حال کم‌حجم‌کردن...';try{await postCompression('/api/compress/image',f,{quality:$('#imageQuality').value},'#compressImageStatus','amnayar-compressed.jpg')}catch(e){s.textContent=e.message}}
-async function compressPDF(){const f=$('#compressPdfFile').files[0],s=$('#compressPdfStatus');if(!f)return s.textContent='فایل PDF را انتخاب کنید.';s.textContent='در حال کم‌حجم‌کردن...';try{await postCompression('/api/compress/pdf',f,{level:$('#pdfQuality').value},'#compressPdfStatus','amnayar-compressed.pdf')}catch(e){s.textContent=e.message}}
-async function compressVideo(){const f=$('#compressVideoFile').files[0],s=$('#compressVideoStatus');if(!f)return s.textContent='ویدئو را انتخاب کنید.';if(f.size>100*1024*1024)return s.textContent='حداکثر حجم ویدئو ۱۰۰ مگابایت است.';s.textContent='در حال کم‌حجم‌کردن ویدئو؛ بسته به حجم فایل ممکن است چند دقیقه طول بکشد...';try{await postCompression('/api/compress/video',f,{quality:$('#videoQuality').value},'#compressVideoStatus','amnayar-compressed.mp4')}catch(e){s.textContent=e.message}}
+
+// فشرده‌سازی سمت کاربر: برای تصویر هیچ وابستگی به سرویس Render ندارد.
+async function compressImage(){
+  const f=$('#compressImageFile').files[0],s=$('#compressImageStatus');
+  if(!f)return s.textContent='تصویر را انتخاب کنید.';
+  if(f.size>100*1024*1024)return s.textContent='حداکثر حجم تصویر ۱۰۰ مگابایت است.';
+  s.textContent='در حال کم‌حجم‌کردن تصویر...';
+  try{
+    const q=Math.min(0.95,Math.max(0.2,Number($('#imageQuality').value)/100));
+    const src=URL.createObjectURL(f),img=new Image();
+    await new Promise((resolve,reject)=>{img.onload=resolve;img.onerror=reject;img.src=src});
+    const maxSide=3000;
+    const scale=Math.min(1,maxSide/Math.max(img.naturalWidth,img.naturalHeight));
+    const c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.naturalWidth*scale));c.height=Math.max(1,Math.round(img.naturalHeight*scale));
+    c.getContext('2d',{alpha:false}).drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(src);
+    const blob=await new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(new Error('خروجی تصویر ساخته نشد.')),'image/jpeg',q));
+    downloadBlob(blob,'amnayar-compressed.jpg');s.textContent=savingsText(f.size,blob.size);
+  }catch(e){s.textContent='فشرده‌سازی تصویر انجام نشد؛ فرمت تصویر را بررسی کنید.';}
+}
+
+// PDF بدون ارسال فایل به سرور دوباره ذخیره می‌شود و ساختار فایل بهینه می‌شود.
+async function compressPDF(){
+  const f=$('#compressPdfFile').files[0],s=$('#compressPdfStatus');
+  if(!f)return s.textContent='فایل PDF را انتخاب کنید.';
+  if(f.size>100*1024*1024)return s.textContent='حداکثر حجم PDF ۱۰۰ مگابایت است.';
+  s.textContent='در حال بهینه‌سازی PDF در مرورگر...';
+  try{
+    const src=await PDFLib.PDFDocument.load(await f.arrayBuffer(),{updateMetadata:false});
+    src.setTitle('');src.setAuthor('');src.setSubject('');src.setKeywords([]);src.setProducer('AmnaYar');src.setCreator('AmnaYar');
+    const bytes=await src.save({useObjectStreams:true,addDefaultPage:false,updateFieldAppearances:false});
+    const blob=new Blob([bytes],{type:'application/pdf'});downloadBlob(blob,'amnayar-compressed.pdf');s.textContent=savingsText(f.size,blob.size);
+  }catch(e){s.textContent='فشرده‌سازی PDF انجام نشد؛ ممکن است فایل رمزدار یا آسیب‌دیده باشد.';}
+}
+
+// ویدئو در خود مرورگر با MediaRecorder به WebM فشرده می‌شود؛ فایل به سرور ارسال نمی‌شود.
+async function compressVideo(){
+  const f=$('#compressVideoFile').files[0],s=$('#compressVideoStatus');
+  if(!f)return s.textContent='ویدئو را انتخاب کنید.';
+  if(f.size>100*1024*1024)return s.textContent='حداکثر حجم ویدئو ۱۰۰ مگابایت است.';
+  if(!window.MediaRecorder)return s.textContent='مرورگر شما فشرده‌سازی ویدئو را پشتیبانی نمی‌کند؛ لطفاً Chrome یا Edge را امتحان کنید.';
+  s.textContent='در حال کم‌حجم‌کردن ویدئو در مرورگر...';
+  const url=URL.createObjectURL(f),video=document.createElement('video');video.src=url;video.muted=false;video.volume=0;video.playsInline=true;video.preload='metadata';
+  try{
+    await new Promise((resolve,reject)=>{video.onloadedmetadata=resolve;video.onerror=reject});
+    const q=$('#videoQuality').value;const maxW=q==='small'?960:1280;const scale=Math.min(1,maxW/video.videoWidth);const w=Math.max(2,Math.round(video.videoWidth*scale/2)*2),h=Math.max(2,Math.round(video.videoHeight*scale/2)*2);
+    const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d');
+    const stream=canvas.captureStream(24);const sourceStream=video.captureStream?.();if(sourceStream){sourceStream.getAudioTracks().forEach(t=>stream.addTrack(t));}const mime=MediaRecorder.isTypeSupported('video/webm;codecs=vp9')?'video/webm;codecs=vp9':MediaRecorder.isTypeSupported('video/webm;codecs=vp8')?'video/webm;codecs=vp8':'video/webm';
+    const bitrate=q==='small'?700000:q==='high'?1800000:1200000;const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:bitrate});const chunks=[];rec.ondataavailable=e=>{if(e.data.size)chunks.push(e.data)};
+    const done=new Promise((resolve,reject)=>{rec.onstop=()=>resolve();rec.onerror=e=>reject(e.error||e)});let raf=0;
+    const draw=()=>{if(video.ended||video.paused)return;ctx.drawImage(video,0,0,w,h);raf=requestAnimationFrame(draw)};
+    rec.start(250);await video.play();draw();await new Promise(resolve=>video.onended=resolve);cancelAnimationFrame(raf);rec.stop();await done;stream.getTracks().forEach(t=>t.stop());sourceStream?.getTracks().forEach(t=>t.stop());
+    const blob=new Blob(chunks,{type:'video/webm'});downloadBlob(blob,'amnayar-compressed.webm');s.textContent=savingsText(f.size,blob.size)+' — خروجی WebM است.';
+  }catch(e){s.textContent='فشرده‌سازی ویدئو انجام نشد؛ Chrome یا Edge را امتحان کنید.';}
+  finally{URL.revokeObjectURL(url);}
+}

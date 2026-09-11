@@ -522,7 +522,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.5', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.8', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -861,12 +861,15 @@ app.post('/api/analytics/tool', async (req,res) => {
 
 app.get('/api/owner/analytics', auth, owner, async (req,res)=>{
   try {
-    const [days,paths,tools] = await Promise.all([
-      q(`SELECT TO_CHAR(created_at AT TIME ZONE 'Asia/Tehran','YYYY-MM-DD') day,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY 1 ORDER BY 1`),
-      q(`SELECT path,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY path ORDER BY views DESC LIMIT 12`),
-      q(`SELECT tool_slug,COUNT(*)::int uses FROM tool_usage WHERE created_at>=NOW()-INTERVAL '30 days' GROUP BY tool_slug ORDER BY uses DESC LIMIT 12`)
+    const raw=Number(req.query.days||30);
+    const daysCount=[7,30,90].includes(raw)?raw:30;
+    const [days,paths,tools,totals] = await Promise.all([
+      q(`SELECT TO_CHAR(created_at AT TIME ZONE 'Asia/Tehran','YYYY-MM-DD') day,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY 1 ORDER BY 1`,[daysCount]),
+      q(`SELECT path,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY path ORDER BY views DESC LIMIT 12`,[daysCount]),
+      q(`SELECT COALESCE(ts.name,tu.tool_slug) name,tu.tool_slug,COUNT(*)::int uses FROM tool_usage tu LEFT JOIN tool_settings ts ON ts.slug=tu.tool_slug WHERE tu.created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY ts.name,tu.tool_slug ORDER BY uses DESC LIMIT 12`,[daysCount]),
+      q(`SELECT (SELECT COUNT(*)::int FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) views,(SELECT COUNT(*)::int FROM tool_usage WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) tool_uses,(SELECT COUNT(*)::int FROM checks WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) checks`,[daysCount])
     ]);
-    res.json({days:days.rows,paths:paths.rows,tools:tools.rows});
+    res.json({days:days.rows,paths:paths.rows,tools:tools.rows,totals:totals.rows[0],period:daysCount});
   } catch(e) { console.error(e); res.status(500).json({error:'دریافت آمار انجام نشد.'}); }
 });
 
@@ -918,8 +921,22 @@ app.get('/api/owner/users', auth, owner, async (req, res) => {
   const params=[]; const where=[];
   if(search){ params.push(`%${search}%`); where.push(`(LOWER(email) LIKE $${params.length} OR LOWER(username) LIKE $${params.length})`); }
   if(['user','hr','owner'].includes(role)){ params.push(role); where.push(`role=$${params.length}`); }
-  const r=await q(`SELECT id,email,username,role,is_active,email_verified,created_at FROM users ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY id DESC LIMIT 200`,params);
+  const r=await q(`SELECT u.id,u.email,u.username,u.role,u.is_active,u.email_verified,u.created_at,
+    (SELECT COUNT(*)::int FROM checks c WHERE c.user_id=u.id) AS check_count,
+    (SELECT COUNT(*)::int FROM conversations c WHERE c.user_id=u.id) AS conversation_count
+    FROM users u ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY u.id DESC LIMIT 200`,params);
   res.json({users:r.rows});
+});
+app.get('/api/owner/users/:id', auth, owner, async (req,res)=>{
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id)||id<1) return res.status(400).json({error:'شناسه کاربر نامعتبر است.'});
+  const r=await q(`SELECT u.id,u.email,u.username,u.role,u.is_active,u.email_verified,u.created_at,
+    (SELECT COUNT(*)::int FROM checks c WHERE c.user_id=u.id) AS check_count,
+    (SELECT COUNT(*)::int FROM conversations c WHERE c.user_id=u.id) AS conversation_count,
+    (SELECT COUNT(*)::int FROM messages m WHERE m.user_id=u.id) AS message_count
+    FROM users u WHERE u.id=$1`,[id]);
+  if(!r.rowCount) return res.status(404).json({error:'کاربر پیدا نشد.'});
+  res.json({user:r.rows[0]});
 });
 app.patch('/api/owner/users/:id', auth, owner, async (req, res) => {
   const id=Number(req.params.id);
@@ -949,7 +966,7 @@ app.get('/api/owner/audit', auth, owner, async (req,res)=>{
 app.get('/api/owner/system', auth, owner, async (req,res)=>{
   const started=Date.now();
   const db=await q('SELECT NOW() AS now');
-  res.json({ok:true,version:'3.9.3',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
+  res.json({ok:true,version:'3.9.8',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;

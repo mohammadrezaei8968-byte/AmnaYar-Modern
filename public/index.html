@@ -18,8 +18,21 @@
 <article class="popular-card gov"><div class="service-icon">🏛️</div><div><span class="service-tag official">دولت هوشمند</span><h3>پنجره ملی خدمات دولت</h3><p>دسترسی به مجموعه بزرگی از خدمات دولتی و احراز هویت‌های رسمی.</p><a class="btn primary" href="https://my.gov.ir/" target="_blank" rel="noopener">ورود به دولت من</a></div></article>
 </div></section>
 
-
-
+<section id="quick-check" class="section checker-home-section">
+  <div class="heading"><span>بررسی رایگان</span><h2>صحت‌سنجی کد ملی، کارت بانکی و شبا</h2><p>نتیجه را ساده و واضح ببینید؛ برای کارت بانکی و شبا نام بانک هم نمایش داده می‌شود.</p></div>
+  <div class="home-checker-grid">
+    <button class="home-check-card active" onclick="openHomeCheck('national',this)"><span>🪪</span><b>کد ملی</b><small>صحت‌سنجی رایگان</small></button>
+    <button class="home-check-card" onclick="openHomeCheck('card',this)"><span>💳</span><b>کارت بانکی</b><small>صحت‌سنجی و نام بانک</small></button>
+    <button class="home-check-card" onclick="openHomeCheck('iban',this)"><span>🏦</span><b>شماره شبا</b><small>صحت‌سنجی و نام بانک</small></button>
+  </div>
+  <div class="panel home-checker-box">
+    <form onsubmit="submitHomeCheck(event)">
+      <label id="homeCheckLabel">کد ملی<input id="homeCheckInput" inputmode="numeric" autocomplete="off" placeholder="مثلاً ۰۴۹۹۳۷۰۸۹۹"></label>
+      <button id="homeCheckBtn" class="btn primary" type="submit">بررسی رایگان</button>
+    </form>
+    <div id="homeCheckResult" class="result-box hidden"></div>
+  </div>
+</section>
 
 <section id="markets" class="section market-section">
 <div class="heading"><span>آنلاین بازار</span><h2>قیمت‌های روز بازار</h2><p>طلا، سکه، ارز، رمزارز و شاخص‌ها را رایگان ببینید. قیمت‌ها از منبع بازار نمایش داده می‌شوند.</p></div>

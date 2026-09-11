@@ -9,6 +9,9 @@ import XLSX from 'xlsx';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import multer from 'multer';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -29,7 +32,99 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 
+function contentDisposition(filename) {
+  const safe = String(filename || 'amnayar-file').replace(/[\\"\r\n]/g, '_');
+  return `attachment; filename="${safe}"`;
+}
+
+app.post('/api/compress/image', mediaUpload.single('file'), async (req, res) => {
+  let dir = '';
+  try {
+    if (!req.file) return res.status(400).json({ error: 'تصویر را انتخاب کنید.' });
+    const quality = Math.min(90, Math.max(20, Number(req.body.quality || 70)));
+    dir = await fs.mkdtemp('/tmp/amnayar-image-');
+    const inputPath = path.join(dir, 'input');
+    const outputPath = path.join(dir, 'output.jpg');
+    await fs.writeFile(inputPath, req.file.buffer);
+    await execFileAsync('ffmpeg', ['-y','-i',inputPath,'-q:v',String(Math.max(2, Math.round((100-quality)/10)+2)),'-frames:v','1',outputPath], { timeout: 60000 });
+    const out = await fs.readFile(outputPath);
+    if (out.length >= req.file.buffer.length) return res.status(400).json({ error: 'این تصویر با کیفیت انتخاب‌شده کوچک‌تر نشد؛ کیفیت پایین‌تر را امتحان کنید.' });
+    res.setHeader('Content-Type', 'image/jpeg');
+    res.setHeader('Content-Disposition', contentDisposition('amnayar-compressed.jpg'));
+    res.setHeader('X-Original-Bytes', String(req.file.buffer.length));
+    res.setHeader('X-Output-Bytes', String(out.length));
+    res.send(out);
+  } catch (e) {
+    console.error(e);
+    res.status(400).json({ error: 'فشرده‌سازی تصویر انجام نشد. فرمت تصویر را بررسی کنید.' });
+  } finally {
+    if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+app.post('/api/compress/pdf', mediaUpload.single('file'), async (req, res) => {
+  let inputPath = '', outputPath = '';
+  try {
+    if (!req.file) return res.status(400).json({ error: 'فایل PDF را انتخاب کنید.' });
+    if (req.file.mimetype !== 'application/pdf' && !String(req.file.originalname).toLowerCase().endsWith('.pdf')) {
+      return res.status(400).json({ error: 'فقط فایل PDF مجاز است.' });
+    }
+    const dir = await fs.mkdtemp('/tmp/amnayar-pdf-');
+    inputPath = path.join(dir, 'input.pdf');
+    outputPath = path.join(dir, 'output.pdf');
+    await fs.writeFile(inputPath, req.file.buffer);
+    const level = String(req.body.level || 'ebook');
+    const settings = ['screen', 'ebook', 'printer'].includes(level) ? level : 'ebook';
+    await execFileAsync('gs', ['-sDEVICE=pdfwrite','-dCompatibilityLevel=1.4','-dNOPAUSE','-dQUIET','-dBATCH',`-dPDFSETTINGS=/${settings}`,'-sOutputFile=' + outputPath,inputPath], { timeout: 120000 });
+    const out = await fs.readFile(outputPath);
+    if (out.length >= req.file.buffer.length) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', contentDisposition('amnayar-compressed.pdf'));
+      res.setHeader('X-Original-Bytes', String(req.file.buffer.length));
+      res.setHeader('X-Output-Bytes', String(out.length));
+      return res.send(out);
+    }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', contentDisposition('amnayar-compressed.pdf'));
+    res.setHeader('X-Original-Bytes', String(req.file.buffer.length));
+    res.setHeader('X-Output-Bytes', String(out.length));
+    res.send(out);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'فشرده‌سازی PDF انجام نشد. ممکن است فایل رمزدار یا آسیب‌دیده باشد.' });
+  } finally {
+    if (inputPath) await fs.rm(path.dirname(inputPath), { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+app.post('/api/compress/video', mediaUpload.single('file'), async (req, res) => {
+  let inputPath = '', outputPath = '';
+  try {
+    if (!req.file) return res.status(400).json({ error: 'ویدئو را انتخاب کنید.' });
+    const dir = await fs.mkdtemp('/tmp/amnayar-video-');
+    inputPath = path.join(dir, 'input');
+    outputPath = path.join(dir, 'output.mp4');
+    await fs.writeFile(inputPath, req.file.buffer);
+    const quality = String(req.body.quality || 'balanced');
+    const crf = quality === 'small' ? '31' : quality === 'high' ? '25' : '28';
+    await execFileAsync('ffmpeg', ['-y','-i',inputPath,'-vf','scale=min(1280\,iw):-2:force_original_aspect_ratio=decrease','-c:v','libx264','-preset','veryfast','-crf',crf,'-c:a','aac','-b:a','128k','-movflags','+faststart',outputPath], { timeout: 300000 });
+    const out = await fs.readFile(outputPath);
+    res.setHeader('Content-Type', 'video/mp4');
+    res.setHeader('Content-Disposition', contentDisposition('amnayar-compressed.mp4'));
+    res.setHeader('X-Original-Bytes', String(req.file.buffer.length));
+    res.setHeader('X-Output-Bytes', String(out.length));
+    res.send(out);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: 'فشرده‌سازی ویدئو انجام نشد. فرمت یا حجم فایل را بررسی کنید.' });
+  } finally {
+    if (inputPath) await fs.rm(path.dirname(inputPath), { recursive: true, force: true }).catch(() => {});
+  }
+});
+
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const mediaUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+const execFileAsync = promisify(execFile);
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
@@ -286,7 +381,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.6.1', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.4.0', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -440,39 +535,6 @@ function ibanDetails(input) {
   };
 }
 
-
-// Public market snapshot proxy. Prices are fetched from TGJU at request time.
-const MARKET_PROFILES = {
-  gold18: 'https://www.tgju.org/profile/geram18',
-  dollar: 'https://www.tgju.org/profile/price_dollar_rl',
-  euro: 'https://www.tgju.org/profile/price_eur',
-  pound: 'https://www.tgju.org/profile/price_gbp',
-  sekee: 'https://www.tgju.org/profile/sekee'
-};
-async function fetchTgjuCurrent(url) {
-  const r = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 AmnaYar/3.6' } });
-  if (!r.ok) throw new Error(`TGJU ${r.status}`);
-  const html = await r.text();
-  const m = html.match(/نرخ\s*فعلی\s*[:：]+\s*([0-9۰-۹,]+)/);
-  if (!m) throw new Error('TGJU current price not found');
-  const raw = m[1].replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).replace(/,/g,'');
-  const value = Number(raw);
-  if (!Number.isFinite(value)) throw new Error('TGJU price invalid');
-  return value;
-}
-app.get('/api/market', async (req,res) => {
-  try {
-    const entries = await Promise.all(Object.entries(MARKET_PROFILES).map(async ([key,url]) => {
-      try { return [key, await fetchTgjuCurrent(url)]; } catch { return [key, null]; }
-    }));
-    const data = Object.fromEntries(entries);
-    const available = Object.values(data).some(v => Number.isFinite(v));
-    if (!available) return res.status(503).json({ error:'قیمت بازار فعلاً در دسترس نیست.' });
-    res.set('Cache-Control','public, max-age=20, stale-while-revalidate=40');
-    res.json({ source:'TGJU', fetchedAt:new Date().toISOString(), data });
-  } catch (e) { res.status(503).json({ error:'قیمت بازار فعلاً در دسترس نیست.' }); }
-});
-
 app.post('/api/check', auth, async (req, res) => {
   try {
     const kind = String(req.body.kind || '');
@@ -493,7 +555,7 @@ app.post('/api/check', auth, async (req, res) => {
     if (kind === 'national') details.issuingCity = city || 'ثبت نشده';
     if (kind === 'card') details.bankName = valid ? cardBank(input) : 'قابل شناسایی نیست (شماره کارت نامعتبر است)';
     if (kind === 'iban') Object.assign(details, valid ? ibanDetails(input) : { bankCode: '—', bankName: 'قابل شناسایی نیست (شماره شبا نامعتبر است)', accountNumber: '—' });
-    res.json({ valid, result, mode: 'structural', details, note: 'این نتیجه فقط اعتبارسنجی ساختاری است و تأیید مالکیت یا فعال بودن حساب محسوب نمی‌شود.' });
+    res.json({ valid, result, details });
   } catch (e) {
     console.error(e);
     res.status(500).json({ error: 'خطای ثبت استعلام.' });

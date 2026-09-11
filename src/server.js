@@ -194,7 +194,10 @@ function owner(req, res, next) {
   next();
 }
 function safeUser(u) {
-  return { id: u.id, email: u.email, username: u.username, role: u.role, created_at: u.created_at };
+  return { id: u.id, email: u.email, username: u.username, role: u.role, is_active: u.is_active !== false, email_verified: !!u.email_verified, created_at: u.created_at };
+}
+async function ownerAudit(req, action, targetType='', targetId='', details={}) {
+  try { await q('INSERT INTO owner_audit_logs(owner_user_id,action,target_type,target_id,details) VALUES($1,$2,$3,$4,$5)', [req.user.id, action, targetType || null, targetId ? String(targetId) : null, JSON.stringify(details)]); } catch (e) { console.error('owner audit:', e); }
 }
 
 async function init() {
@@ -208,6 +211,7 @@ async function init() {
     credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0),
     role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','hr','owner')),
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
 
@@ -229,6 +233,18 @@ async function init() {
   )`);
 
 
+
+  await q(`ALTER TABLE users ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE`);
+
+  await q(`CREATE TABLE IF NOT EXISTS owner_audit_logs(
+    id BIGSERIAL PRIMARY KEY,
+    owner_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    action TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
 
   await q(`DO $$ BEGIN
     ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
@@ -418,7 +434,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.4.0', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.0', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -446,6 +462,7 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     const password = String(req.body.password || '');
     const r = await q('SELECT * FROM users WHERE email=$1 OR username=$1', [identifier]);
     if (!r.rowCount || !(await bcrypt.compare(password, r.rows[0].password_hash))) return res.status(401).json({ error: 'نام کاربری/ایمیل یا رمز عبور نادرست است.' });
+    if (r.rows[0].is_active === false) return res.status(403).json({ error: 'این حساب غیرفعال شده است. با مالک سامانه تماس بگیرید.' });
     setSession(res, r.rows[0]);
     res.json({ user: safeUser(r.rows[0]) });
   } catch (e) {
@@ -737,13 +754,55 @@ app.get('/api/hr/export.csv',auth,async(req,res)=>{try{const d=await hrExportDat
 app.get('/api/owner/organizations',auth,owner,async(req,res)=>{const r=await q(`SELECT o.id,o.name,o.code,COUNT(m.id)::int hr_count FROM organizations o LEFT JOIN organization_members m ON m.organization_id=o.id AND m.member_role='hr' GROUP BY o.id ORDER BY o.id DESC`);res.json({organizations:r.rows})});
 app.post('/api/owner/organizations',auth,owner,async(req,res)=>{try{const name=String(req.body.name||'').trim(),code=String(req.body.code||'').trim().toUpperCase(),email=normalizeEmail(req.body.hr_email);if(!name||!/^[A-Z0-9_-]{3,32}$/.test(code)||!email)return res.status(400).json({error:'نام سازمان، کد سازمان و ایمیل مدیر منابع انسانی را کامل وارد کنید.'});const u=await q('SELECT id FROM users WHERE email=$1',[email]);if(!u.rowCount)return res.status(404).json({error:'ابتدا حساب کاربری مدیر منابع انسانی را با این ایمیل بسازید.'});const org=await q('INSERT INTO organizations(name,code,created_by) VALUES($1,$2,$3) RETURNING *',[name,code,req.user.id]);await q("UPDATE users SET role='hr' WHERE id=$1",[u.rows[0].id]);await q("INSERT INTO organization_members(organization_id,user_id,member_role) VALUES($1,$2,'hr') ON CONFLICT DO NOTHING",[org.rows[0].id,u.rows[0].id]);res.json({ok:true,organization:org.rows[0]})}catch(e){console.error(e);res.status(500).json({error:'ساخت سازمان انجام نشد؛ ممکن است کد سازمان تکراری باشد.'})}});
 app.get('/api/owner/stats', auth, owner, async (req, res) => {
-  const [users, checks] = await Promise.all([
+  const [users, checks, conversations, messages, active] = await Promise.all([
     q("SELECT COUNT(*)::int count FROM users WHERE role='user'"),
     q('SELECT COUNT(*)::int count FROM checks'),
+    q('SELECT COUNT(*)::int count FROM conversations'),
+    q('SELECT COUNT(*)::int count FROM messages'),
+    q('SELECT COUNT(*)::int count FROM users WHERE is_active=true'),
   ]);
   const orgs = await q('SELECT COUNT(*)::int count FROM organizations');
   const hr = await q("SELECT COUNT(*)::int count FROM users WHERE role='hr'");
-  res.json({ users: users.rows[0].count, checks: checks.rows[0].count, organizations: orgs.rows[0].count, hr: hr.rows[0].count });
+  res.json({ users: users.rows[0].count, checks: checks.rows[0].count, organizations: orgs.rows[0].count, hr: hr.rows[0].count, conversations: conversations.rows[0].count, messages: messages.rows[0].count, activeUsers: active.rows[0].count });
+});
+app.get('/api/owner/users', auth, owner, async (req, res) => {
+  const search = String(req.query.search || '').trim().toLowerCase();
+  const role = String(req.query.role || '').trim();
+  const params=[]; const where=[];
+  if(search){ params.push(`%${search}%`); where.push(`(LOWER(email) LIKE $${params.length} OR LOWER(username) LIKE $${params.length})`); }
+  if(['user','hr','owner'].includes(role)){ params.push(role); where.push(`role=$${params.length}`); }
+  const r=await q(`SELECT id,email,username,role,is_active,email_verified,created_at FROM users ${where.length?'WHERE '+where.join(' AND '):''} ORDER BY id DESC LIMIT 200`,params);
+  res.json({users:r.rows});
+});
+app.patch('/api/owner/users/:id', auth, owner, async (req, res) => {
+  const id=Number(req.params.id);
+  if(!Number.isInteger(id) || id<1) return res.status(400).json({error:'شناسه کاربر نامعتبر است.'});
+  const current=await q('SELECT id,email,username,role,is_active,email_verified FROM users WHERE id=$1',[id]);
+  if(!current.rowCount) return res.status(404).json({error:'کاربر پیدا نشد.'});
+  const target=current.rows[0];
+  if(target.id===req.user.id && (req.body.role && req.body.role!=='owner' || req.body.is_active===false)) return res.status(400).json({error:'نمی‌توانید دسترسی مالک حساب فعلی خودتان را حذف کنید.'});
+  const updates=[]; const params=[];
+  if(['user','hr','owner'].includes(req.body.role) && req.body.role!==target.role){params.push(req.body.role);updates.push(`role=$${params.length}`);}
+  if(typeof req.body.is_active==='boolean' && req.body.is_active!==target.is_active){params.push(req.body.is_active);updates.push(`is_active=$${params.length}`);}
+  if(typeof req.body.email_verified==='boolean' && req.body.email_verified!==target.email_verified){params.push(req.body.email_verified);updates.push(`email_verified=$${params.length}`);}
+  if(!updates.length) return res.json({ok:true,user:target});
+  params.push(id);
+  const r=await q(`UPDATE users SET ${updates.join(', ')} WHERE id=$${params.length} RETURNING id,email,username,role,is_active,email_verified,created_at`,params);
+  await ownerAudit(req,'update_user','user',id,{before:target,after:r.rows[0]});
+  res.json({ok:true,user:r.rows[0]});
+});
+app.get('/api/owner/checks', auth, owner, async (req,res)=>{
+  const r=await q(`SELECT c.id,u.email,u.username,c.kind,c.result,c.created_at FROM checks c JOIN users u ON u.id=c.user_id ORDER BY c.id DESC LIMIT 200`);
+  res.json({checks:r.rows});
+});
+app.get('/api/owner/audit', auth, owner, async (req,res)=>{
+  const r=await q(`SELECT a.id,a.action,a.target_type,a.target_id,a.details,a.created_at,u.username AS owner_username FROM owner_audit_logs a LEFT JOIN users u ON u.id=a.owner_user_id ORDER BY a.id DESC LIMIT 100`);
+  res.json({logs:r.rows});
+});
+app.get('/api/owner/system', auth, owner, async (req,res)=>{
+  const started=Date.now();
+  const db=await q('SELECT NOW() AS now');
+  res.json({ok:true,version:'3.9.0',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;

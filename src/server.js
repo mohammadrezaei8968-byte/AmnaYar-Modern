@@ -46,21 +46,24 @@ app.post('/api/compress/image', mediaUpload.single('file'), async (req, res) => 
   let dir = '';
   try {
     if (!req.file) return res.status(400).json({ error: 'تصویر را انتخاب کنید.' });
+    if (!String(req.file.mimetype || '').startsWith('image/')) return res.status(400).json({ error: 'فقط فایل تصویری مجاز است.' });
     const quality = Math.min(90, Math.max(20, Number(req.body.quality || 70)));
     dir = await fs.mkdtemp('/tmp/amnayar-image-');
     const inputPath = path.join(dir, 'input');
     const outputPath = path.join(dir, 'output.jpg');
     await fs.writeFile(inputPath, req.file.buffer);
-    await execFileAsync('ffmpeg', ['-y','-i',inputPath,'-q:v',String(Math.max(2, Math.round((100-quality)/10)+2)),'-frames:v','1',outputPath], { timeout: 60000 });
+    // Sharp is bundled with the app, so image compression does not depend on ffmpeg.
+    const sharp = (await import('sharp')).default;
+    await sharp(inputPath).rotate().jpeg({ quality, mozjpeg: true }).toFile(outputPath);
     const out = await fs.readFile(outputPath);
-    if (out.length >= req.file.buffer.length) return res.status(400).json({ error: 'این تصویر با کیفیت انتخاب‌شده کوچک‌تر نشد؛ کیفیت پایین‌تر را امتحان کنید.' });
+    if (!out.length) return res.status(500).json({ error: 'خروجی تصویر ساخته نشد.' });
     res.setHeader('Content-Type', 'image/jpeg');
     res.setHeader('Content-Disposition', contentDisposition('amnayar-compressed.jpg'));
     res.setHeader('X-Original-Bytes', String(req.file.buffer.length));
     res.setHeader('X-Output-Bytes', String(out.length));
     res.send(out);
   } catch (e) {
-    console.error(e);
+    console.error('image compression:', e);
     res.status(400).json({ error: 'فشرده‌سازی تصویر انجام نشد. فرمت تصویر را بررسی کنید.' });
   } finally {
     if (dir) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -124,6 +127,39 @@ app.post('/api/compress/video', mediaUpload.single('file'), async (req, res) => 
     res.status(500).json({ error: 'فشرده‌سازی ویدئو انجام نشد. فرمت یا حجم فایل را بررسی کنید.' });
   } finally {
     if (inputPath) await fs.rm(path.dirname(inputPath), { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+
+// ترجمه رایگان فارسی ↔ انگلیسی؛ متن فقط برای همان درخواست به سرویس ترجمه ارسال می‌شود.
+const translateLimiter = rateLimit({ windowMs: 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false });
+function decodeBasicHtml(text) {
+  return String(text || '')
+    .replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>');
+}
+app.post('/api/translate', translateLimiter, async (req, res) => {
+  try {
+    const text = String(req.body?.text || '').trim();
+    const direction = req.body?.direction === 'en-fa' ? 'en|fa' : 'fa|en';
+    if (!text) return res.status(400).json({ error: 'متن را وارد کنید.' });
+    if (text.length > 5000) return res.status(400).json({ error: 'حداکثر ۵۰۰۰ نویسه مجاز است.' });
+    const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${direction}`;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+      const r = await fetch(url, { signal: controller.signal, headers: { 'Accept': 'application/json' } });
+      if (!r.ok) throw new Error(`translation upstream ${r.status}`);
+      const data = await r.json();
+      const translated = decodeBasicHtml(data?.responseData?.translatedText || '');
+      if (!translated) throw new Error('empty translation');
+      res.json({ translatedText: translated, direction: req.body?.direction === 'en-fa' ? 'en-fa' : 'fa-en' });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (e) {
+    console.error('translation:', e);
+    res.status(502).json({ error: 'ترجمه در حال حاضر در دسترس نیست؛ دوباره تلاش کنید.' });
   }
 });
 

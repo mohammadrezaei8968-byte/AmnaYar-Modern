@@ -2,7 +2,7 @@ services:
   - type: web
     name: amnayar-web
     runtime: node
-    buildCommand: apt-get update && apt-get install -y ghostscript ffmpeg && npm install
+    buildCommand: apt-get update && apt-get install -y ghostscript ffmpeg && npm install --include=optional
     startCommand: npm start
     envVars:
       - key: DATABASE_URL

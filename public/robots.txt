@@ -1,0 +1,6 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /owner
+Disallow: /hr
+Sitemap: https://amnayar-modern.onrender.com/sitemap.xml

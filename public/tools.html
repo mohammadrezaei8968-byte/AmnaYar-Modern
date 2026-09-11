@@ -1,6 +1,6 @@
 <!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ابزارهای رایگان | امنا یار</title><link rel="stylesheet" href="/styles.css"><script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script><script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script><script>window.addEventListener('load',()=>{if(window.pdfjsLib)pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';});</script></head><body><script>
 (function(){
-  function showSelectedTool(){
+  window.showSelectedTool=function(){
     var tool=new URLSearchParams(location.search).get('tool');
     if(!tool) return;
     tool=String(tool).replace(/[^a-z0-9_-]/gi,'');
@@ -10,11 +10,17 @@
     panels.forEach(function(panel){
       panel.style.display=(panel===selected)?'':'none';
     });
-    window.scrollTo(0,0);
-    setTimeout(function(){window.scrollTo(0,0);},50);
-  }
-  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',showSelectedTool);
-  else showSelectedTool();
+    requestAnimationFrame(function(){
+      requestAnimationFrame(function(){
+        var header=document.querySelector('.nav');
+        var offset=(header?header.getBoundingClientRect().height:0)+18;
+        var top=selected.getBoundingClientRect().top+window.pageYOffset-offset;
+        window.scrollTo({top:Math.max(0,top),left:0,behavior:'auto'});
+      });
+    });
+  };
+  if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',window.showSelectedTool);
+  else window.showSelectedTool();
 })();
 </script><header class="nav"><a class="brand" href="/"><img src="/assets/logo-amnayar.png" alt="امنا یار"><span>امنا یار<small>ابزارهای رایگان</small></span></a><nav><a href="/">خانه</a><a href="/#markets">بازار آنلاین</a><a href="/#official">سامانه‌های رسمی</a></nav></header><main class="section"><div class="heading"><span>رایگان</span><h1>ابزارهای کاربردی امنا یار</h1><p>بدون اشتراک، اعتبار یا پرداخت.</p></div><section id="car" class="tool-panel panel"><h2>🚗 محاسبه‌گر قیمت خودرو</h2><p>قیمت کارخانه و بازار را وارد کنید تا اختلاف، درصد اختلاف و سود یا زیان محاسبه شود.</p><div class="two-col"><div class="tool-box"><h3>اطلاعات خودرو</h3><input id="carName" placeholder="نام خودرو (اختیاری)"><input id="carFactory" type="number" min="0" placeholder="قیمت کارخانه (تومان)"><input id="carMarket" type="number" min="0" placeholder="قیمت بازار (تومان)"><button class="btn primary" onclick="carCalc()">محاسبه</button><p id="carResult"></p></div><div class="tool-box"><h3>مقایسه خرید</h3><input id="carBuy" type="number" min="0" placeholder="قیمت خرید شما (تومان)"><input id="carSell" type="number" min="0" placeholder="قیمت فروش احتمالی (تومان)"><input id="carExtra" type="number" min="0" value="0" placeholder="هزینه‌های جانبی (تومان)"><button class="btn soft" onclick="carProfitCalc()">محاسبه سود/زیان</button><p id="carProfitResult"></p></div></div></section>
 <section id="gold" class="tool-panel panel"><h2>🥇 محاسبه‌گر جامع طلا و سکه</h2><p>برای برآورد خرید و فروش طلا، وزن، عیار، اجرت، مالیات و قیمت هر گرم را وارد کنید.</p><div class="two-col"><div class="tool-box"><h3>محاسبه قیمت خرید</h3><input id="goldWeight" type="number" min="0" step="0.001" placeholder="وزن (گرم)"><select id="goldKarat"><option value="18">طلای ۱۸ عیار</option><option value="24">طلای ۲۴ عیار</option></select><input id="goldGram" type="number" min="0" placeholder="قیمت هر گرم طلای ۱۸ عیار (تومان)"><input id="goldWage" type="number" min="0" step="0.1" placeholder="اجرت (درصد)"><input id="goldTax" type="number" min="0" step="0.1" value="10" placeholder="مالیات روی اجرت و سود (%)"><input id="goldProfit" type="number" min="0" step="0.1" value="7" placeholder="سود فروشنده (%)"><button class="btn primary" onclick="goldBuyCalc()">محاسبه قیمت خرید</button><p id="goldBuyResult"></p></div><div class="tool-box"><h3>برآورد قیمت فروش</h3><input id="goldSellWeight" type="number" min="0" step="0.001" placeholder="وزن طلا (گرم)"><input id="goldSellGram" type="number" min="0" placeholder="قیمت هر گرم ۱۸ عیار (تومان)"><input id="goldSellFee" type="number" min="0" step="0.1" value="0" placeholder="کسر/هزینه فروش (%)"><button class="btn soft" onclick="goldSellCalc()">محاسبه مبلغ فروش</button><p id="goldSellResult"></p></div></div><div class="tool-box"><h3>ارزش سکه</h3><input id="coinCount" type="number" min="0" step="1" placeholder="تعداد سکه"><input id="coinPrice" type="number" min="0" placeholder="قیمت هر سکه (تومان)"><button class="btn soft" onclick="coinCalc()">محاسبه ارزش سکه</button><p id="coinResult"></p></div></section>
@@ -31,5 +37,7 @@
    if(h){const icon=t.icon||'🛠️'; h.textContent=icon+' '+t.name;}
    if(p&&t.description)p.textContent=t.description;
  });
-}catch(e){console.warn('public tools config',e)}})();
+}catch(e){console.warn('public tools config',e)}finally{
+  if(typeof window.showSelectedTool==='function') window.showSelectedTool();
+}})();
 </script></body></html>

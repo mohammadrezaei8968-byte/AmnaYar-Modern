@@ -32,6 +32,11 @@ app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
 
+// File-processing middleware must be initialized before any route that uses it.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
+const mediaUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
+const execFileAsync = promisify(execFile);
+
 function contentDisposition(filename) {
   const safe = String(filename || 'amnayar-file').replace(/[\\"\r\n]/g, '_');
   return `attachment; filename="${safe}"`;
@@ -121,10 +126,6 @@ app.post('/api/compress/video', mediaUpload.single('file'), async (req, res) => 
     if (inputPath) await fs.rm(path.dirname(inputPath), { recursive: true, force: true }).catch(() => {});
   }
 });
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
-const mediaUpload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 100 * 1024 * 1024 } });
-const execFileAsync = promisify(execFile);
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
 

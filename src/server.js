@@ -231,7 +231,16 @@ function safeUser(u) {
 }
 
 app.get('/owner', auth, owner, (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
-app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
+app.use(express.static(path.join(__dirname, '../public'), {
+  extensions: ['html'],
+  setHeaders: (res, filePath) => {
+    if (/\.(?:js|css|png|jpg|jpeg|svg|ico|webp|woff|woff2)$/i.test(filePath)) {
+      res.setHeader('Cache-Control','public, max-age=604800, immutable');
+    } else {
+      res.setHeader('Cache-Control','public, max-age=60, stale-while-revalidate=300');
+    }
+  }
+}));
 async function ownerAudit(req, action, targetType='', targetId='', details={}) {
   try { await q('INSERT INTO owner_audit_logs(owner_user_id,action,target_type,target_id,details) VALUES($1,$2,$3,$4,$5)', [req.user.id, action, targetType || null, targetId ? String(targetId) : null, JSON.stringify(details)]); } catch (e) { console.error('owner audit:', e); }
 }

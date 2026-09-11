@@ -18,9 +18,9 @@ function calcGold(){const w=+document.getElementById('goldWeight')?.value;const 
 
 // جستجوی داخلی سایت — بدون ارسال متن جستجو به سرور
 const siteSearchItems = [
-  {title:'صحت‌سنجی کد ملی', desc:'بررسی رایگان کد ملی', href:'/?check=national#quick-check', tags:'کد ملی صحت سنجی اعتبارسنجی'},
-  {title:'صحت‌سنجی کارت بانکی', desc:'بررسی کارت و شناسایی بانک', href:'/?check=card#quick-check', tags:'کارت بانکی شماره کارت بانک'},
-  {title:'صحت‌سنجی شماره شبا', desc:'بررسی شبا و شناسایی بانک', href:'/?check=iban#quick-check', tags:'شبا شماره شبا بانک'},
+  {title:'صحت‌سنجی کد ملی', desc:'بررسی رایگان کد ملی', href:'/?check=national', check:'national', tags:'کد ملی صحت سنجی اعتبارسنجی'},
+  {title:'صحت‌سنجی کارت بانکی', desc:'بررسی کارت و شناسایی بانک', href:'/?check=card', check:'card', tags:'کارت بانکی شماره کارت بانک'},
+  {title:'صحت‌سنجی شماره شبا', desc:'بررسی شبا و شناسایی بانک', href:'/?check=iban', check:'iban', tags:'شبا شماره شبا بانک'},
   {title:'استعلام بیمه خودرو', desc:'ورود به سامانه رسمی بیمه مرکزی', href:'#popular', tags:'بیمه خودرو بیمه نامه'},
   {title:'استعلام چک صیادی', desc:'سامانه رسمی بانک مرکزی', href:'#popular', tags:'چک صیادی بانک مرکزی'},
   {title:'رهگیری مرسوله پستی', desc:'پیگیری بسته در سامانه پست', href:'#popular', tags:'پست مرسوله رهگیری کد رهگیری'},
@@ -56,13 +56,14 @@ function setupSiteSearch(){
     const matches=siteSearchItems.map((x,i)=>({x,i,hay:normalizeSearch(x.title+' '+x.desc+' '+x.tags)}))
       .filter(o=>words.every(w=>o.hay.includes(w))).slice(0,7);
     if(!matches.length){box.innerHTML='<div class="search-empty">نتیجه‌ای پیدا نشد. عبارت دیگری را امتحان کنید.</div>';box.classList.remove('hidden');return;}
-    box.innerHTML=matches.map(o=>`<a class="search-result" href="${o.x.href}" role="option"><span class="search-result-icon">⌕</span><span><b>${o.x.title}</b><small>${o.x.desc}</small></span><i>↗</i></a>`).join('');
+    box.innerHTML=matches.map(o=>`<a class="search-result" href="${o.x.href}" ${o.x.check?`data-check="${o.x.check}"`:''} role="option"><span class="search-result-icon">⌕</span><span><b>${o.x.title}</b><small>${o.x.desc}</small></span><i>↗</i></a>`).join('');
     box.classList.remove('hidden');
   }
   input.addEventListener('input',render);
   input.addEventListener('focus',()=>{if(input.value.trim())render()});
   document.addEventListener('click',e=>{if(!e.target.closest('.site-search'))close()});
-  input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.value='';close();input.blur()} if(e.key==='Enter'){const first=box.querySelector('a');if(first){e.preventDefault();location.href=first.href}}});
+  box.addEventListener('click',e=>{const a=e.target.closest('.search-result');if(!a)return;const kind=a.dataset.check;if(kind){e.preventDefault();close();input.value='';if(location.pathname==='/'||location.pathname==='/index.html'){const btn=[...document.querySelectorAll('.home-check-card')].find(x=>x.dataset.check===kind);if(btn){openHomeCheck(kind,btn);document.getElementById('quick-check')?.scrollIntoView({behavior:'auto',block:'start'});history.replaceState({},'',location.pathname+'?check='+encodeURIComponent(kind)+'#quick-check');}}else{location.href='/?check='+encodeURIComponent(kind);}}});
+  input.addEventListener('keydown',e=>{if(e.key==='Escape'){input.value='';close();input.blur()} if(e.key==='Enter'){const first=box.querySelector('a');if(first){e.preventDefault();first.click()}}});
 }
 setupSiteSearch();
 
@@ -70,10 +71,10 @@ setupSiteSearch();
 function openHomeCheckFromQuery(){
   const kind=new URLSearchParams(location.search).get('check');
   if(!kind || !homeCheckConfig?.[kind]) return;
-  const btn=document.querySelector(`.home-check-card[onclick*="'${kind}'"]`);
+  const btn=[...document.querySelectorAll('.home-check-card')].find(x=>x.dataset.check===kind);
   if(btn) openHomeCheck(kind,btn);
   const section=document.getElementById('quick-check');
-  if(section) setTimeout(()=>section.scrollIntoView({behavior:'auto',block:'start'}),80);
+  if(section) requestAnimationFrame(()=>section.scrollIntoView({behavior:'auto',block:'start'}));
   history.replaceState({},'',location.pathname+'#quick-check');
 }
 
@@ -88,7 +89,7 @@ function homeNormalize(v){return String(v||'').replace(/[۰-۹]/g,d=>String('۰�
 function homeLuhn(s){let sum=0,alt=false;for(let i=s.length-1;i>=0;i--){let n=Number(s[i]);if(alt){n*=2;if(n>9)n-=9}sum+=n;alt=!alt}return sum%10===0}
 function homeNational(s){if(!/^\d{10}$/.test(s)||/^([0-9])\1{9}$/.test(s))return false;let sum=0;for(let i=0;i<9;i++)sum+=Number(s[i])*(10-i);const r=sum%11;const c=Number(s[9]);return r<2?c===r:c===11-r}
 function homeIban(s){if(!/^IR\d{24}$/.test(s))return false;const moved=s.slice(4)+'1827'+s.slice(2,4);let rem=0;for(const ch of moved)rem=(rem*10+Number(ch))%97;return rem===1}
-function openHomeCheck(kind,btn){homeCheckKind=kind;document.querySelectorAll('.home-check-card').forEach(x=>x.classList.remove('active'));btn.classList.add('active');const c=homeCheckConfig[kind];const label=document.getElementById('homeCheckLabel');const input=document.getElementById('homeCheckInput');label.firstChild.textContent=c.label;input.placeholder=c.placeholder;input.inputMode=c.mode;input.value='';document.getElementById('homeCheckResult').className='result-box hidden';input.focus()}
+function openHomeCheck(kind,btn){homeCheckKind=kind;document.querySelectorAll('.home-check-card').forEach(x=>x.classList.remove('active'));if(btn)btn.classList.add('active');const c=homeCheckConfig[kind];const label=document.getElementById('homeCheckLabel');const input=document.getElementById('homeCheckInput');label.firstChild.textContent=c.label;input.placeholder=c.placeholder;input.inputMode=c.mode;input.value='';document.getElementById('homeCheckResult').className='result-box hidden';input.focus()}
 function homeResult(ok,title,detail=''){const box=document.getElementById('homeCheckResult');box.className='result-box '+(ok?'success':'danger');box.innerHTML=`<div class="result-icon">${ok?'✓':'!'}</div><div><strong>${title}</strong>${detail?`<p>${detail}</p>`:''}</div>`;box.classList.remove('hidden')}
 function submitHomeCheck(e){e.preventDefault();const v=homeNormalize(document.getElementById('homeCheckInput').value);if(!v)return homeResult(false,'مقدار را وارد کنید.');let ok=false,detail='';if(homeCheckKind==='national'){ok=homeNational(v)}else if(homeCheckKind==='card'){ok=/^\d{16}$/.test(v)&&homeLuhn(v);if(ok)detail=`بانک: ${homeCardBanks[v.slice(0,6)]||'بانک از روی شماره کارت شناسایی نشد'}`}else{ok=homeIban(v);if(ok){const code=v.slice(4,7);detail=`بانک: ${homeBankCodes[code]||'بانک از روی شماره شبا شناسایی نشد'}`}}homeResult(ok,ok?'صحیح است':'نامعتبر است',detail)}
 
@@ -96,7 +97,14 @@ function submitHomeCheck(e){e.preventDefault();const v=homeNormalize(document.ge
 // مالک سایت می‌تواند محتوای عمومی و ابزارهای فعال را بدون Deploy تغییر دهد.
 async function loadPublicConfig(){
   try{
-    const r=await fetch('/api/public-config?ts='+Date.now(),{cache:'no-store'}); if(!r.ok)return; const c=await r.json(); const s=c.settings||{};
+    const cached=localStorage.getItem('amnayar_public_config');
+    if(cached){try{applyPublicConfig(JSON.parse(cached));}catch(e){}}
+    const r=await fetch('/api/public-config?ts='+Date.now(),{cache:'no-store'}); if(!r.ok)return; const c=await r.json(); localStorage.setItem('amnayar_public_config',JSON.stringify(c)); applyPublicConfig(c);
+  }catch(e){}
+}
+function applyPublicConfig(c){
+  try{
+    const s=c.settings||{};
     if(s.site_title){ document.title=s.site_title; const brand=document.querySelector('footer .brand span'); if(brand){ const small=brand.querySelector('small'); brand.childNodes[0].textContent=s.site_title.split('|')[0].trim()+' '; if(s.footer_text&&small) small.textContent=s.footer_text; } }
     const desc=document.querySelector('meta[name="description"]'); if(desc&&s.site_description)desc.content=s.site_description;
     const badge=document.querySelector('.hero-copy .pill'); if(badge&&s.hero_badge)badge.textContent=s.hero_badge;
@@ -111,6 +119,7 @@ async function loadPublicConfig(){
     (c.notices||[]).slice(0,1).forEach(n=>{if(!document.getElementById('publicNotice')){const bar=document.createElement('div');bar.id='publicNotice';bar.className='public-notice '+n.type;bar.innerHTML=`<b>${escapeHtml(n.title)}</b><span>${escapeHtml(n.body)}</span>`;document.body.insertBefore(bar,document.body.firstChild)}});
   }catch(e){}
 }
+
 function applyHomeLayout(settings){
   const ids=['popular','quick-check','markets','tools','official','why','topics','support'];
   ids.forEach(id=>{const el=document.getElementById(id); if(!el)return; const key='home_show_'+id.replace(/-/g,'_'); el.style.display=(settings[key]===undefined||settings[key]==='true'||settings[key]===true)?'':'none';});
@@ -123,4 +132,5 @@ loadPublicConfig();
 document.addEventListener('click',e=>{const a=e.target.closest('a[href*="/tools.html?tool="]');if(a){const slug=(new URL(a.href,location.origin)).searchParams.get('tool')||'';fetch('/api/analytics/tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}).catch(()=>{})}});
 
 
-if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',openHomeCheckFromQuery)}else{setTimeout(openHomeCheckFromQuery,0)}
+openHomeCheckFromQuery();
+if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',openHomeCheckFromQuery)}

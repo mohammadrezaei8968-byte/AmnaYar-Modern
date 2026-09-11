@@ -8,6 +8,7 @@ import pg from 'pg';
 import XLSX from 'xlsx';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -27,6 +28,8 @@ app.use(express.json({ limit: '12mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, '../public'), { extensions: ['html'] }));
+
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 8 * 1024 * 1024 } });
 
 const authLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: true, legacyHeaders: false });
 
@@ -71,7 +74,7 @@ async function init() {
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     credits INTEGER NOT NULL DEFAULT 0 CHECK (credits >= 0),
-    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','owner')),
+    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user','hr','owner')),
     email_verified BOOLEAN NOT NULL DEFAULT FALSE,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
   )`);
@@ -95,6 +98,68 @@ async function init() {
 
 
 
+  await q(`DO $$ BEGIN
+    ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+    ALTER TABLE users ADD CONSTRAINT users_role_check CHECK (role IN ('user','hr','owner'));
+  EXCEPTION WHEN duplicate_object THEN NULL; END $$`);
+
+  await q(`CREATE TABLE IF NOT EXISTS organizations(
+    id BIGSERIAL PRIMARY KEY,
+    name TEXT NOT NULL,
+    code TEXT NOT NULL UNIQUE,
+    created_by BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS organization_members(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    member_role TEXT NOT NULL DEFAULT 'member' CHECK (member_role IN ('hr','member')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id,user_id)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS stores(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    store_code TEXT NOT NULL,
+    store_name TEXT NOT NULL,
+    address TEXT,
+    postal_code TEXT,
+    supervisor TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id,store_code)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS employees(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    personnel_code TEXT NOT NULL,
+    first_name TEXT NOT NULL DEFAULT '',
+    last_name TEXT NOT NULL DEFAULT '',
+    store_code TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id,personnel_code)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS attendance_records(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    personnel_code TEXT NOT NULL,
+    period TEXT NOT NULL DEFAULT '',
+    overtime_hours NUMERIC(10,2) NOT NULL DEFAULT 0,
+    allowed_hours NUMERIC(10,2),
+    attendance_percent NUMERIC(6,2),
+    excess_hours NUMERIC(10,2) NOT NULL DEFAULT 0,
+    imported_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE(organization_id,personnel_code,period)
+  )`);
+  await q(`CREATE TABLE IF NOT EXISTS report_imports(
+    id BIGSERIAL PRIMARY KEY,
+    organization_id BIGINT NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+    user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    filename TEXT NOT NULL,
+    rows_imported INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  )`);
+
   await q(`CREATE TABLE IF NOT EXISTS checks(
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -117,7 +182,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.2.0', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.3.0', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -307,12 +372,117 @@ app.get('/api/dashboard', auth, async (req, res) => {
   res.json({ user: u.rows[0], checks: checks.rows });
 });
 
+
+function digitsFa(v) {
+  return String(v ?? '').replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d))).trim();
+}
+function numValue(v) {
+  const s = digitsFa(v).replace(/,/g, '.').replace(/٪/g, '').trim();
+  if (!s) return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+function headerKey(v) {
+  return String(v ?? '').replace(/[\u200c\u200f\u200e]/g,'').replace(/[\s_\-]+/g,'').replace(/[():：]/g,'').trim().toLowerCase();
+}
+const columnAliases = {
+  storeCode:['کد فروشگاه','کدفروشگاه','storecode','store_code'],
+  storeName:['نام فروشگاه','نامفروشگاه','storename','store_name'],
+  storeAddress:['آدرس فروشگاه','آدرسفروشگاه','آدرس','storeaddress','address'],
+  storePostal:['کد پستی فروشگاه','کدپستيفروشگاه','کد پستی','کدپستی','storepostal','postalcode'],
+  supervisor:['سوپروایزر فروشگاه','سوپروایزر','سرپرست فروشگاه','supervisor'],
+  personnelCode:['کد پرسنلی','کدپرسنلی','کد پرسنل','personnelcode','personnel_code','employeeid'],
+  firstName:['نام پرسنل','نام','firstname','first_name'],
+  lastName:['نام خانوادگی پرسنل','نام خانوادگی','نامخانوادگی','lastname','last_name'],
+  overtime:['اضافه کار پرسنل','اضافه کار','اضافه‌کار','اضافهکار','overtime','overtimehours'],
+  allowed:['ساعت مجاز پرسنل','ساعت مجاز','ساعات مجاز','allowedhours','allowed_hours'],
+  attendance:['درصد حضور پرسنل','درصد حضور','درصدحضور','attendance','attendancepercent','attendance_percent'],
+  excess:['مازاد حضور پرسنل','مازاد حضور','مازادحضور','excesshours','excess_hours'],
+  period:['دوره','ماه','دوره گزارش','period','month']
+};
+const aliasMap = new Map(Object.entries(columnAliases).flatMap(([k,arr]) => arr.map(a => [headerKey(a), k])));
+function mapRow(row) {
+  const out = {};
+  for (const [k,v] of Object.entries(row)) { const target = aliasMap.get(headerKey(k)); if (target) out[target] = v; }
+  return out;
+}
+function normalizeUploadRow(row, defaultPeriod='') {
+  const r=mapRow(row);
+  return {
+    storeCode: digitsFa(r.storeCode), storeName:String(r.storeName||'').trim(), storeAddress:String(r.storeAddress||'').trim(), storePostal:digitsFa(r.storePostal), supervisor:String(r.supervisor||'').trim(),
+    personnelCode:digitsFa(r.personnelCode), firstName:String(r.firstName||'').trim(), lastName:String(r.lastName||'').trim(),
+    overtime:numValue(r.overtime) ?? 0, allowed:numValue(r.allowed), attendance:numValue(r.attendance), excess:numValue(r.excess) ?? 0, period:digitsFa(r.period || defaultPeriod)
+  };
+}
+async function getHRContext(req, res) {
+  if (req.user.role === 'owner') {
+    const orgId = Number(req.query.org_id || 0);
+    const r = orgId ? await q('SELECT * FROM organizations WHERE id=$1',[orgId]) : await q('SELECT * FROM organizations ORDER BY id LIMIT 1');
+    if (!r.rowCount) { res.status(404).json({error:'هنوز سازمانی ساخته نشده است.'}); return null; }
+    return r.rows[0];
+  }
+  if (req.user.role !== 'hr') { res.status(403).json({error:'دسترسی مدیر منابع انسانی لازم است.'}); return null; }
+  const r = await q(`SELECT o.* FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=$1 AND m.member_role='hr' ORDER BY o.id LIMIT 1`,[req.user.id]);
+  if (!r.rowCount) { res.status(404).json({error:'سازمانی برای این حساب منابع انسانی تعریف نشده است.'}); return null; }
+  return r.rows[0];
+}
+
+app.get('/api/hr/dashboard', auth, async (req,res)=>{
+  try {
+    const org=await getHRContext(req,res); if(!org)return;
+    const period=digitsFa(req.query.period||''); const search=String(req.query.search||'').trim();
+    const like=`%${search}%`;
+    const params=[org.id]; let p=2; const periodClause=period?` AND a.period=$${p++}`:''; const searchClause=search?` AND (e.personnel_code ILIKE $${p} OR e.first_name ILIKE $${p} OR e.last_name ILIKE $${p} OR COALESCE(s.store_name,'') ILIKE $${p})`:''; if(period)params.push(period); if(search)params.push(like);
+    const [employees,stores,attendance,stats]=await Promise.all([
+      q(`SELECT e.personnel_code,e.first_name,e.last_name,e.store_code,s.store_name,a.overtime_hours,a.allowed_hours,a.attendance_percent,a.excess_hours FROM employees e LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code LEFT JOIN LATERAL (SELECT * FROM attendance_records a0 WHERE a0.organization_id=e.organization_id AND a0.personnel_code=e.personnel_code${period?' AND a0.period=$2':''} ORDER BY a0.id DESC LIMIT 1) a ON true WHERE e.organization_id=$1${search?` AND (e.personnel_code ILIKE $${period?3:2} OR e.first_name ILIKE $${period?3:2} OR e.last_name ILIKE $${period?3:2} OR COALESCE(s.store_name,'') ILIKE $${period?3:2})`:''} ORDER BY e.personnel_code LIMIT 500`, period?[org.id,period,...(search?[like]:[])]:[org.id,...(search?[like]:[])]),
+      q(`SELECT s.*,COUNT(e.id)::int employee_count FROM stores s LEFT JOIN employees e ON e.organization_id=s.organization_id AND e.store_code=s.store_code WHERE s.organization_id=$1 GROUP BY s.id ORDER BY s.store_code LIMIT 500`,[org.id]),
+      q(`SELECT a.period,a.personnel_code,e.first_name,e.last_name,a.overtime_hours,a.allowed_hours,a.attendance_percent,a.excess_hours FROM attendance_records a LEFT JOIN employees e ON e.organization_id=a.organization_id AND e.personnel_code=a.personnel_code WHERE a.organization_id=$1${periodClause}${searchClause} ORDER BY a.id DESC LIMIT 1000`,params),
+      q(`SELECT (SELECT COUNT(*) FROM employees WHERE organization_id=$1)::int employees,(SELECT COUNT(*) FROM stores WHERE organization_id=$1)::int stores,COALESCE((SELECT AVG(attendance_percent) FROM attendance_records WHERE organization_id=$1${period?' AND period=$2':''}),0)::numeric attendance_avg,COALESCE((SELECT SUM(overtime_hours) FROM attendance_records WHERE organization_id=$1${period?' AND period=$2':''}),0)::numeric overtime_total`,period?[org.id,period]:[org.id])
+    ]);
+    res.json({organization:org,stats:stats.rows[0],employees:employees.rows,stores:stores.rows,attendance:attendance.rows});
+  }catch(e){console.error(e);res.status(500).json({error:'خطای دریافت داشبورد منابع انسانی.'})}
+});
+
+app.post('/api/hr/import', auth, upload.single('report'), async (req,res)=>{
+  try {
+    const org=await getHRContext(req,res); if(!org)return;
+    if(!req.file)return res.status(400).json({error:'فایل گزارش را انتخاب کنید.'});
+    const ext=path.extname(req.file.originalname).toLowerCase(); if(!['.xlsx','.xls','.csv'].includes(ext))return res.status(400).json({error:'فقط فایل Excel یا CSV مجاز است.'});
+    const wb=XLSX.read(req.file.buffer,{type:'buffer',cellDates:false}); let rows=[];
+    for(const name of wb.SheetNames){const sheet=XLSX.utils.sheet_to_json(wb.Sheets[name],{defval:''}); rows.push(...sheet.map(normalizeUploadRow));}
+    const defaultPeriod=digitsFa(req.body.period||''); rows=rows.map(r=>({...r,period:r.period||defaultPeriod}));
+    let imported=0,updated=0;
+    for(const r of rows){
+      if(r.storeCode && r.storeName){const old=await q('SELECT id FROM stores WHERE organization_id=$1 AND store_code=$2',[org.id,r.storeCode]); await q(`INSERT INTO stores(organization_id,store_code,store_name,address,postal_code,supervisor,updated_at) VALUES($1,$2,$3,$4,$5,$6,NOW()) ON CONFLICT(organization_id,store_code) DO UPDATE SET store_name=EXCLUDED.store_name,address=EXCLUDED.address,postal_code=EXCLUDED.postal_code,supervisor=EXCLUDED.supervisor,updated_at=NOW()`,[org.id,r.storeCode,r.storeName,r.storeAddress||null,r.storePostal||null,r.supervisor||null]); old.rowCount?updated++:imported++;}
+      if(r.personnelCode){const old=await q('SELECT id FROM employees WHERE organization_id=$1 AND personnel_code=$2',[org.id,r.personnelCode]); await q(`INSERT INTO employees(organization_id,personnel_code,first_name,last_name,store_code,updated_at) VALUES($1,$2,$3,$4,$5,NOW()) ON CONFLICT(organization_id,personnel_code) DO UPDATE SET first_name=EXCLUDED.first_name,last_name=EXCLUDED.last_name,store_code=EXCLUDED.store_code,updated_at=NOW()`,[org.id,r.personnelCode,r.firstName,r.lastName,r.storeCode||null]); old.rowCount?updated++:imported++; if(r.period){const oldA=await q('SELECT id FROM attendance_records WHERE organization_id=$1 AND personnel_code=$2 AND period=$3',[org.id,r.personnelCode,r.period]); await q(`INSERT INTO attendance_records(organization_id,personnel_code,period,overtime_hours,allowed_hours,attendance_percent,excess_hours) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(organization_id,personnel_code,period) DO UPDATE SET overtime_hours=EXCLUDED.overtime_hours,allowed_hours=EXCLUDED.allowed_hours,attendance_percent=EXCLUDED.attendance_percent,excess_hours=EXCLUDED.excess_hours,imported_at=NOW()`,[org.id,r.personnelCode,r.period,r.overtime,r.allowed,r.attendance,r.excess]); oldA.rowCount?updated++:imported++;}}
+    }
+    await q('INSERT INTO report_imports(organization_id,user_id,filename,rows_imported) VALUES($1,$2,$3,$4)',[org.id,req.user.id,req.file.originalname,rows.length]);
+    res.json({ok:true,imported,updated,rows:rows.length});
+  }catch(e){console.error(e);res.status(500).json({error:'پردازش فایل انجام نشد. قالب ستون‌ها را بررسی کنید.'})}
+});
+
+async function hrExportData(req){
+  const org=await getHRContext(req,{status:()=>{},json:()=>{}}); if(!org)throw new Error('no org');
+  const period=digitsFa(req.query.period||''); const search=String(req.query.search||'').trim(); const params=[org.id]; let extra=''; if(period){params.push(period);extra+=' AND a.period=$'+params.length;} if(search){params.push('%'+search+'%');extra+=' AND (e.personnel_code ILIKE $'+params.length+' OR e.first_name ILIKE $'+params.length+' OR e.last_name ILIKE $'+params.length+' OR COALESCE(s.store_name,\'\') ILIKE $'+params.length+')';}
+  const employees=(await q(`SELECT e.personnel_code AS "کد پرسنلی",e.first_name AS "نام",e.last_name AS "نام خانوادگی",e.store_code AS "کد فروشگاه",s.store_name AS "نام فروشگاه",a.overtime_hours AS "اضافه کار پرسنل",a.allowed_hours AS "ساعت مجاز پرسنل",a.attendance_percent AS "درصد حضور پرسنل",a.excess_hours AS "مازاد حضور پرسنل",a.period AS "دوره" FROM employees e LEFT JOIN stores s ON s.organization_id=e.organization_id AND s.store_code=e.store_code LEFT JOIN LATERAL (SELECT * FROM attendance_records a0 WHERE a0.organization_id=e.organization_id AND a0.personnel_code=e.personnel_code${period?' AND a0.period=$2':''} ORDER BY a0.id DESC LIMIT 1) a ON true WHERE e.organization_id=$1${search?` AND (e.personnel_code ILIKE $${period?3:2} OR e.first_name ILIKE $${period?3:2} OR e.last_name ILIKE $${period?3:2} OR COALESCE(s.store_name,'') ILIKE $${period?3:2})`:''} ORDER BY e.personnel_code`,period?[org.id,period,...(search?[`%${search}%`]:[])]:[org.id,...(search?[`%${search}%`]:[])] )).rows;
+  const stores=(await q(`SELECT store_code AS "کد فروشگاه",store_name AS "نام فروشگاه",address AS "آدرس فروشگاه",postal_code AS "کد پستی فروشگاه",supervisor AS "سوپروایزر فروشگاه" FROM stores WHERE organization_id=$1 ORDER BY store_code`,[org.id])).rows;
+  const attendance=(await q(`SELECT a.period AS "دوره",a.personnel_code AS "کد پرسنلی",e.first_name AS "نام",e.last_name AS "نام خانوادگی",a.overtime_hours AS "اضافه کار پرسنل",a.allowed_hours AS "ساعت مجاز پرسنل",a.attendance_percent AS "درصد حضور پرسنل",a.excess_hours AS "مازاد حضور پرسنل" FROM attendance_records a LEFT JOIN employees e ON e.organization_id=a.organization_id AND e.personnel_code=a.personnel_code WHERE a.organization_id=$1${extra} ORDER BY a.id DESC`,params)).rows;
+  return {org,employees,stores,attendance};
+}
+app.get('/api/hr/export.xlsx',auth,async(req,res)=>{try{const d=await hrExportData(req);const wb=XLSX.utils.book_new();XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.employees),'پرسنل');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.stores),'فروشگاه‌ها');XLSX.utils.book_append_sheet(wb,XLSX.utils.json_to_sheet(d.attendance),'حضور و غیاب');const buf=XLSX.write(wb,{type:'buffer',bookType:'xlsx'});res.setHeader('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-hr.xlsx"`);res.send(buf)}catch(e){console.error(e);res.status(500).json({error:'خروجی Excel آماده نشد.'})}});
+app.get('/api/hr/export.csv',auth,async(req,res)=>{try{const d=await hrExportData(req);const rows=d.employees.map(x=>({"کد فروشگاه":x['کد فروشگاه'],"نام فروشگاه":x['نام فروشگاه'],"کد پرسنلی":x['کد پرسنلی'],"نام":x['نام'],"نام خانوادگی":x['نام خانوادگی'],"اضافه کار پرسنل":x['اضافه کار پرسنل'],"ساعت مجاز پرسنل":x['ساعت مجاز پرسنل'],"درصد حضور پرسنل":x['درصد حضور پرسنل'],"مازاد حضور پرسنل":x['مازاد حضور پرسنل'],"دوره":x['دوره']}));const csv='\ufeff'+XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(rows));res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-hr.csv"`);res.send(csv)}catch(e){console.error(e);res.status(500).json({error:'خروجی CSV آماده نشد.'})}});
+
+
+app.get('/api/owner/organizations',auth,owner,async(req,res)=>{const r=await q(`SELECT o.id,o.name,o.code,COUNT(m.id)::int hr_count FROM organizations o LEFT JOIN organization_members m ON m.organization_id=o.id AND m.member_role='hr' GROUP BY o.id ORDER BY o.id DESC`);res.json({organizations:r.rows})});
+app.post('/api/owner/organizations',auth,owner,async(req,res)=>{try{const name=String(req.body.name||'').trim(),code=String(req.body.code||'').trim().toUpperCase(),email=normalizeEmail(req.body.hr_email);if(!name||!/^[A-Z0-9_-]{3,32}$/.test(code)||!email)return res.status(400).json({error:'نام سازمان، کد سازمان و ایمیل مدیر منابع انسانی را کامل وارد کنید.'});const u=await q('SELECT id FROM users WHERE email=$1',[email]);if(!u.rowCount)return res.status(404).json({error:'ابتدا حساب کاربری مدیر منابع انسانی را با این ایمیل بسازید.'});const org=await q('INSERT INTO organizations(name,code,created_by) VALUES($1,$2,$3) RETURNING *',[name,code,req.user.id]);await q("UPDATE users SET role='hr' WHERE id=$1",[u.rows[0].id]);await q("INSERT INTO organization_members(organization_id,user_id,member_role) VALUES($1,$2,'hr') ON CONFLICT DO NOTHING",[org.rows[0].id,u.rows[0].id]);res.json({ok:true,organization:org.rows[0]})}catch(e){console.error(e);res.status(500).json({error:'ساخت سازمان انجام نشد؛ ممکن است کد سازمان تکراری باشد.'})}});
 app.get('/api/owner/stats', auth, owner, async (req, res) => {
   const [users, checks] = await Promise.all([
     q("SELECT COUNT(*)::int count FROM users WHERE role='user'"),
     q('SELECT COUNT(*)::int count FROM checks'),
   ]);
-  res.json({ users: users.rows[0].count, checks: checks.rows[0].count });
+  const orgs = await q('SELECT COUNT(*)::int count FROM organizations');
+  const hr = await q("SELECT COUNT(*)::int count FROM users WHERE role='hr'");
+  res.json({ users: users.rows[0].count, checks: checks.rows[0].count, organizations: orgs.rows[0].count, hr: hr.rows[0].count });
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;
@@ -327,6 +497,7 @@ app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
 });
 
 app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, '../public/dashboard.html')));
+app.get('/hr', (req, res) => res.sendFile(path.join(__dirname, '../public/hr.html')));
 app.get('/owner', (req, res) => res.sendFile(path.join(__dirname, '../public/owner.html')));
 app.get(/^(?!\/api(?:\/|$)).*/, (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 

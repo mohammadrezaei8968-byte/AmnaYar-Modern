@@ -98,3 +98,7 @@ async function compressVideo(){
   }catch(e){s.textContent='فشرده‌سازی ویدئو انجام نشد؛ Chrome یا Edge را امتحان کنید.';}
   finally{URL.revokeObjectURL(url);}
 }
+
+
+(async()=>{try{const r=await fetch('/api/public-config');if(!r.ok)return;const c=await r.json();const enabled=new Set((c.tools||[]).filter(x=>x.enabled).map(x=>x.slug));if(c.tools?.length)document.querySelectorAll('.tool-panel[id]').forEach(sec=>{sec.style.display=enabled.has(sec.id)?'':'none'});if((c.notices||[]).length){const n=c.notices[0];const bar=document.createElement('div');bar.className='public-notice '+n.type;bar.innerHTML=`<b>${escapeHtml(n.title)}</b><span>${escapeHtml(n.body)}</span>`;document.body.insertBefore(bar,document.body.firstChild)}}catch(e){}})();
+function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}

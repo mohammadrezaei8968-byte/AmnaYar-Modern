@@ -537,7 +537,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.11', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.18', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -983,7 +983,7 @@ app.get('/api/owner/audit', auth, owner, async (req,res)=>{
 app.get('/api/owner/system', auth, owner, async (req,res)=>{
   const started=Date.now();
   const db=await q('SELECT NOW() AS now');
-  res.json({ok:true,version:'3.9.9',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
+  res.json({ok:true,version:'3.9.18',node:process.version,uptime:Math.round(process.uptime()),db:true,dbLatencyMs:Date.now()-started,serverTime:db.rows[0].now});
 });
 app.get('/api/owner/export.xlsx', auth, owner, async (req, res) => {
   const users = (await q('SELECT id,email,username,role,created_at FROM users ORDER BY id DESC')).rows;

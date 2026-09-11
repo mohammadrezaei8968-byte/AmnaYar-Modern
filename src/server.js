@@ -20,6 +20,27 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT || 10000);
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-only-change-me';
+const DEFAULT_TOOLS = [
+  ['car','محاسبه‌گر خودرو','قیمت بازار، کارخانه و سود یا زیان',true,10],
+  ['gold','محاسبه‌گر طلا و سکه','خرید، فروش، اجرت و ارزش سکه',true,20],
+  ['currency','محاسبه‌گر ارز','تبدیل ارز و سود یا زیان',true,30],
+  ['rent','محاسبه‌گر رهن و اجاره','تبدیل سریع رهن و اجاره',true,40],
+  ['invoice','فاکتور‌ساز فارسی','ساخت فاکتور PDF رایگان',true,50],
+  ['pdf','ادغام و جداسازی PDF','چند PDF را یکی کنید یا صفحات را جدا کنید',true,60],
+  ['date','تبدیل تاریخ','شمسی و میلادی',true,70],
+  ['calculator','محاسبات روزمره','درصد، تخفیف و اضافه‌کاری',true,80],
+  ['text','ابزار متن','شمارش، پاکسازی و تبدیل اعداد',true,90],
+  ['image','ابزار تصویر','تغییر اندازه و پردازش تصویر',true,100],
+  ['translate','ترجمه فارسی و انگلیسی','ترجمه رایگان فارسی ↔ انگلیسی',true,110],
+  ['compress','کم‌حجم‌کردن فایل','تصویر، PDF و فیلم',true,120],
+];
+
+async function ensureDefaultTools() {
+  for (const [slug,name,description,enabled,sort_order] of DEFAULT_TOOLS) {
+    await q(`INSERT INTO tool_settings(slug,name,description,enabled,sort_order) VALUES($1,$2,$3,$4,$5) ON CONFLICT(slug) DO NOTHING`, [slug,name,description,enabled,sort_order]);
+  }
+}
+
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: process.env.DATABASE_URL && !process.env.DATABASE_URL.includes('localhost') ? { rejectUnauthorized: false } : false,
@@ -471,23 +492,7 @@ async function init() {
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_by BIGINT REFERENCES users(id) ON DELETE SET NULL
   )`);
-  const defaultTools = [
-    ['car','محاسبه‌گر خودرو','قیمت بازار، کارخانه و سود یا زیان',true,10],
-    ['gold','محاسبه‌گر طلا و سکه','خرید، فروش، اجرت و ارزش سکه',true,20],
-    ['currency','محاسبه‌گر ارز','تبدیل ارز و سود یا زیان',true,30],
-    ['rent','محاسبه‌گر رهن و اجاره','تبدیل سریع رهن و اجاره',true,40],
-    ['invoice','فاکتور‌ساز فارسی','ساخت فاکتور PDF رایگان',true,50],
-    ['pdf','ادغام و جداسازی PDF','چند PDF را یکی کنید یا صفحات را جدا کنید',true,60],
-    ['date','تبدیل تاریخ','شمسی و میلادی',true,70],
-    ['calculator','محاسبات روزمره','درصد، تخفیف و اضافه‌کاری',true,80],
-    ['text','ابزار متن','شمارش، پاکسازی و تبدیل اعداد',true,90],
-    ['image','ابزار تصویر','تغییر اندازه و پردازش تصویر',true,100],
-    ['translate','ترجمه فارسی و انگلیسی','ترجمه رایگان فارسی ↔ انگلیسی',true,110],
-    ['compress','کم‌حجم‌کردن فایل','تصویر، PDF و فیلم',true,120],
-  ]
-  for (const [slug,name,description,enabled,sort_order] of defaultTools) {
-    await q(`INSERT INTO tool_settings(slug,name,description,enabled,sort_order) VALUES($1,$2,$3,$4,$5) ON CONFLICT(slug) DO NOTHING`, [slug,name,description,enabled,sort_order]);
-  }
+  await ensureDefaultTools();
   const defaultSettings = {
     site_title:'امنا یار | مرکز استعلام و خدمات آنلاین',
     site_description:'امنا یار؛ مرکز خدمات کاربردی، اعتبارسنجی و دسترسی سریع به سامانه‌های رسمی ایران.',
@@ -839,6 +844,7 @@ app.get('/api/public-config', async (req,res) => {
   res.set('Pragma','no-cache');
   res.set('Expires','0');
   try {
+    await ensureDefaultTools();
     const [settings, tools, notices] = await Promise.all([
       q('SELECT key,value FROM site_settings'),
       q('SELECT slug,name,description,enabled,sort_order FROM tool_settings ORDER BY sort_order,slug'),
@@ -876,7 +882,7 @@ app.get('/api/owner/notices',auth,owner,async(req,res)=>{const r=await q('SELECT
 app.post('/api/owner/notices',auth,owner,async(req,res)=>{const title=String(req.body?.title||'').trim().slice(0,160),body=String(req.body?.body||'').trim().slice(0,1000),type=['info','success','warning','danger'].includes(req.body?.type)?req.body.type:'info';if(!title||!body)return res.status(400).json({error:'عنوان و متن اطلاعیه را وارد کنید.'});const r=await q('INSERT INTO site_notices(title,body,type,created_by) VALUES($1,$2,$3,$4) RETURNING *',[title,body,type,req.user.id]);await ownerAudit(req,'create_notice','notice',r.rows[0].id,{title,type});res.json({ok:true,notice:r.rows[0]});});
 app.patch('/api/owner/notices/:id',auth,owner,async(req,res)=>{const id=Number(req.params.id);const r=await q('UPDATE site_notices SET is_active=COALESCE($1,is_active) WHERE id=$2 RETURNING *',[typeof req.body?.is_active==='boolean'?req.body.is_active:null,id]);if(!r.rowCount)return res.status(404).json({error:'اطلاعیه پیدا نشد.'});await ownerAudit(req,'toggle_notice','notice',id,{is_active:r.rows[0].is_active});res.json({ok:true,notice:r.rows[0]});});
 app.delete('/api/owner/notices/:id',auth,owner,async(req,res)=>{const id=Number(req.params.id);const r=await q('DELETE FROM site_notices WHERE id=$1 RETURNING id',[id]);if(!r.rowCount)return res.status(404).json({error:'اطلاعیه پیدا نشد.'});await ownerAudit(req,'delete_notice','notice',id,{});res.json({ok:true});});
-app.get('/api/owner/tools',auth,owner,async(req,res)=>{const r=await q('SELECT slug,name,description,enabled,sort_order FROM tool_settings ORDER BY sort_order,slug');res.json({tools:r.rows});});
+app.get('/api/owner/tools',auth,owner,async(req,res)=>{try{await ensureDefaultTools();const r=await q('SELECT slug,name,description,enabled,sort_order FROM tool_settings ORDER BY sort_order,slug');res.json({tools:r.rows});}catch(e){console.error('owner tools:',e);res.status(500).json({error:'فهرست ابزارها دریافت نشد.'});}});
 app.patch('/api/owner/tools/:slug',auth,owner,async(req,res)=>{const slug=String(req.params.slug||'').trim();if(typeof req.body?.enabled!=='boolean')return res.status(400).json({error:'وضعیت ابزار نامعتبر است.'});const r=await q('UPDATE tool_settings SET enabled=$1,updated_at=NOW(),updated_by=$2 WHERE slug=$3 RETURNING *',[req.body.enabled,req.user.id,slug]);if(!r.rowCount)return res.status(404).json({error:'ابزار پیدا نشد.'});await ownerAudit(req,'toggle_tool','tool',slug,{enabled:req.body.enabled});res.json({ok:true,tool:r.rows[0]});});
 app.get('/api/owner/admins',auth,owner,async(req,res)=>{const r=await q("SELECT id,email,username,role,is_active,email_verified,created_at FROM users WHERE role IN ('owner','hr') ORDER BY CASE WHEN role='owner' THEN 0 ELSE 1 END,id DESC");res.json({admins:r.rows});});
 

@@ -85,8 +85,8 @@ function submitHomeCheck(e){e.preventDefault();const v=homeNormalize(document.ge
 // مالک سایت می‌تواند محتوای عمومی و ابزارهای فعال را بدون Deploy تغییر دهد.
 async function loadPublicConfig(){
   try{
-    const r=await fetch('/api/public-config'); if(!r.ok)return; const c=await r.json(); const s=c.settings||{};
-    if(s.site_title) document.title=s.site_title;
+    const r=await fetch('/api/public-config?ts='+Date.now(),{cache:'no-store'}); if(!r.ok)return; const c=await r.json(); const s=c.settings||{};
+    if(s.site_title){ document.title=s.site_title; const brand=document.querySelector('footer .brand span'); if(brand){ const small=brand.querySelector('small'); brand.childNodes[0].textContent=s.site_title.split('|')[0].trim()+' '; if(s.footer_text&&small) small.textContent=s.footer_text; } }
     const desc=document.querySelector('meta[name="description"]'); if(desc&&s.site_description)desc.content=s.site_description;
     const badge=document.querySelector('.hero-copy .pill'); if(badge&&s.hero_badge)badge.textContent=s.hero_badge;
     const h=document.querySelector('.hero-copy h1'); if(h&&s.hero_title){const parts=s.hero_title.split('\n');h.innerHTML=parts.map((x,i)=>i===parts.length-1?`<strong>${x}</strong>`:x).join('<br>')}

@@ -517,7 +517,7 @@ async function init() {
   }
 }
 
-app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.1', ai: false, mode: 'free-checks' }));
+app.get('/api/health', (req, res) => res.json({ ok: true, service: 'amnayar-modern', version: '3.9.5', ai: false, mode: 'free-checks' }));
 
 app.post('/api/auth/register', authLimiter, async (req, res) => {
   try {
@@ -835,6 +835,9 @@ app.get('/api/hr/export.xlsx',auth,async(req,res)=>{try{const d=await hrExportDa
 app.get('/api/hr/export.csv',auth,async(req,res)=>{try{const d=await hrExportData(req);const rows=d.attendance;const csv='\ufeff'+XLSX.utils.sheet_to_csv(XLSX.utils.json_to_sheet(rows));res.setHeader('Content-Type','text/csv; charset=utf-8');res.setHeader('Content-Disposition',`attachment; filename="amnayar-${d.org.code}-attendance-v3.4.csv"`);res.send(csv)}catch(e){console.error(e);res.status(500).json({error:'خروجی CSV آماده نشد.'})}});
 
 app.get('/api/public-config', async (req,res) => {
+  res.set('Cache-Control','no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma','no-cache');
+  res.set('Expires','0');
   try {
     const [settings, tools, notices] = await Promise.all([
       q('SELECT key,value FROM site_settings'),

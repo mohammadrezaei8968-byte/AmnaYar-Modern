@@ -2,8 +2,8 @@
 async function translateText(direction){const input=direction==='fa-en'?$('#faToEnText'):$('#enToFaText');const result=direction==='fa-en'?$('#faToEnResult'):$('#enToFaResult');const status=direction==='fa-en'?$('#faToEnStatus'):$('#enToFaStatus');const text=input.value.trim();if(!text){status.textContent='متن را وارد کنید.';return}if(text.length>5000){status.textContent='حداکثر ۵۰۰۰ نویسه مجاز است.';return}status.textContent='در حال ترجمه...';result.value='';try{const r=await fetch('/api/translate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text,direction})});let data={};try{data=await r.json()}catch{}if(!r.ok)throw new Error(data.error||'ترجمه انجام نشد.');result.value=data.translatedText||'';status.textContent='ترجمه آماده است.'}catch(e){status.textContent=e.message||'ترجمه انجام نشد؛ دوباره تلاش کنید.'}}
 const $=s=>document.querySelector(s); const fa=n=>n.toLocaleString('fa-IR');
 async function mergePDFs(){const files=[...$('#mergeFiles').files];if(!files.length)return $('#mergeStatus').textContent='حداقل یک فایل انتخاب کنید.';$('#mergeStatus').textContent='در حال پردازش...';const out=await PDFLib.PDFDocument.create();for(const f of files){const doc=await PDFLib.PDFDocument.load(await f.arrayBuffer());const pages=await out.copyPages(doc,doc.getPageIndices());pages.forEach(p=>out.addPage(p));}download(await out.save(),'amnayar-merged.pdf','application/pdf');$('#mergeStatus').textContent='فایل ادغام شد.'}
-function parsePages(s,max){const set=new Set();for(const part of s.split(',').map(x=>x.trim()).filter(Boolean)){if(part.includes('-')){let[a,b]=part.split('-').map(Number);a=Math.max(1,a);b=Math.min(max,b);for(let i=a;i<=b;i++)set.add(i-1)}else{let n=Number(part);if(n>=1&&n<=max)set.add(n-1)}}return [...set].sort((a,b)=>a-b)}
-async function splitPDF(){const f=$('#splitFile').files[0],spec=$('#splitPages').value;if(!f)return $('#splitStatus').textContent='فایل PDF را انتخاب کنید.';const doc=await PDFLib.PDFDocument.load(await f.arrayBuffer());const idx=parsePages(spec,doc.getPageCount());if(!idx.length)return $('#splitStatus').textContent='شماره صفحه معتبر وارد کنید.';const out=await PDFLib.PDFDocument.create();const pages=await out.copyPages(doc,idx);pages.forEach(p=>out.addPage(p));download(await out.save(),'amnayar-split.pdf','application/pdf');$('#splitStatus').textContent='صفحات جدا شدند.'}
+function parsePages(s,max){const set=new Set();for(const part of s.split(',').map(x=>x.trim()).filter(Boolean)){if(part.includes('-')){let[a,b]=part.split('-').map(Number);if(!Number.isFinite(a)||!Number.isFinite(b))continue;a=Math.max(1,Math.min(max,a));b=Math.max(1,Math.min(max,b));if(a>b)[a,b]=[b,a];for(let i=a;i<=b;i++)set.add(i-1)}else{let n=Number(part);if(Number.isInteger(n)&&n>=1&&n<=max)set.add(n-1)}}return [...set].sort((a,b)=>a-b)}
+async function splitPDF(){const f=$('#splitFile').files[0],spec=$('#splitPages').value.trim(),s=$('#splitStatus');if(!f)return s.textContent='فایل PDF را انتخاب کنید.';if(!spec)return s.textContent='صفحات را وارد کنید.';s.textContent='در حال جدا کردن صفحات...';try{const doc=await PDFLib.PDFDocument.load(await f.arrayBuffer());const groups=spec.split(';').map(x=>x.trim()).filter(Boolean);const outputs=[];for(let g=0;g<groups.length;g++){const idx=parsePages(g,doc.getPageCount());if(!idx.length)continue;const out=await PDFLib.PDFDocument.create();const pages=await out.copyPages(doc,idx);pages.forEach(p=>out.addPage(p));outputs.push({name:`amnayar-pages-${g+1}.pdf`,bytes:await out.save({useObjectStreams:true})})}if(!outputs.length)throw new Error('هیچ صفحه معتبری پیدا نشد.');if(outputs.length===1){download(outputs[0].bytes,outputs[0].name,'application/pdf');s.textContent='فایل PDF جدا شد.'}else{if(!window.JSZip)throw new Error('کتابخانه فشرده‌سازی آماده نیست.');const zip=new JSZip();outputs.forEach(x=>zip.file(x.name,x.bytes));const blob=await zip.generateAsync({type:'blob',compression:'DEFLATE',compressionOptions:{level:6}});downloadBlob(blob,'amnayar-pdf-parts.zip');s.textContent=`${fa(outputs.length)} فایل PDF ساخته شد و داخل ZIP قرار گرفت.`}}catch(e){console.error(e);s.textContent='جداسازی PDF انجام نشد؛ فایل یا شماره صفحات را بررسی کنید.'}}
 function download(bytes,name,type){const blob=new Blob([bytes],{type});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1000)}
 function j2g(jy,jm,jd){let jy2=jy-979,jm2=jm-1,jd2=jd-1;let j_day=365*jy2+Math.floor(jy2/33)*8+Math.floor((jy2%33+3)/4);for(let i=0;i<jm2;i++)j_day+=i<6?31:30;j_day+=jd2;let g_day=j_day+79;let gy=1600+400*Math.floor(g_day/146097);g_day%=146097;let leap=true;if(g_day>=36525){g_day--;gy+=100*Math.floor(g_day/36524);g_day%=36524;if(g_day>=365)g_day++;else leap=false}gy+=4*Math.floor(g_day/1461);g_day%=1461;if(g_day>=366){leap=false;g_day--;gy+=Math.floor(g_day/365);g_day%=365}let gd=g_day+1,gm=0;const md=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31];while(gd>md[gm])gd-=md[gm++];return[gy,gm+1,gd]}
 function g2j(gy,gm,gd){const g_d_m=[0,31,59,90,120,151,181,212,243,273,304,334];let gy2=gy-(gm>2?0:1),days=355666+365*gy2+Math.floor(gy2/4)-Math.floor(gy2/100)+Math.floor((gy2+3)/400)+gd+g_d_m[gm-1];let jy=-1595+33*Math.floor(days/12053);days%=12053;jy+=4*Math.floor(days/1461);days%=1461;if(days>365){jy+=Math.floor((days-1)/365);days=(days-1)%365}let jm=days<186?1+Math.floor(days/31):7+Math.floor((days-186)/30);let jd=1+(days<186?days%31:(days-186)%30);return[jy,jm,jd]}
@@ -42,13 +42,25 @@ async function compressPDF(){
   const f=$('#compressPdfFile').files[0],s=$('#compressPdfStatus');
   if(!f)return s.textContent='فایل PDF را انتخاب کنید.';
   if(f.size>100*1024*1024)return s.textContent='حداکثر حجم PDF ۱۰۰ مگابایت است.';
-  s.textContent='در حال بهینه‌سازی PDF در مرورگر...';
+  if(!window.pdfjsLib)return s.textContent='کتابخانه PDF هنوز آماده نشده است؛ چند ثانیه بعد دوباره تلاش کنید.';
+  s.textContent='در حال فشرده‌سازی PDF در مرورگر...';
   try{
-    const src=await PDFLib.PDFDocument.load(await f.arrayBuffer(),{updateMetadata:false});
-    src.setTitle('');src.setAuthor('');src.setSubject('');src.setKeywords([]);src.setProducer('AmnaYar');src.setCreator('AmnaYar');
-    const bytes=await src.save({useObjectStreams:true,addDefaultPage:false,updateFieldAppearances:false});
-    const blob=new Blob([bytes],{type:'application/pdf'});downloadBlob(blob,'amnayar-compressed.pdf');s.textContent=savingsText(f.size,blob.size);
-  }catch(e){s.textContent='فشرده‌سازی PDF انجام نشد؛ ممکن است فایل رمزدار یا آسیب‌دیده باشد.';}
+    const level=Number($('#pdfQuality').value||70);
+    const pdf=await pdfjsLib.getDocument({data:await f.arrayBuffer()}).promise;
+    const out=await PDFLib.PDFDocument.create();
+    const scale=level<=40?0.9:level<=60?1.1:level<=75?1.35:1.7;
+    const quality=level<=40?0.45:level<=60?0.58:level<=75?0.72:0.86;
+    for(let n=1;n<=pdf.numPages;n++){
+      const page=await pdf.getPage(n);const vp=page.getViewport({scale});
+      const c=document.createElement('canvas');c.width=Math.max(1,Math.round(vp.width));c.height=Math.max(1,Math.round(vp.height));
+      const ctx=c.getContext('2d',{alpha:false});ctx.fillStyle='#fff';ctx.fillRect(0,0,c.width,c.height);
+      await page.render({canvasContext:ctx,viewport:vp}).promise;
+      const data=await new Promise((resolve,reject)=>c.toBlob(b=>b?resolve(b):reject(new Error('image failed')),'image/jpeg',quality));
+      const img=await out.embedJpg(await data.arrayBuffer());const p=out.addPage([vp.width,vp.height]);p.drawImage(img,{x:0,y:0,width:vp.width,height:vp.height});c.width=1;c.height=1;
+      s.textContent=`در حال فشرده‌سازی صفحه ${fa(n)} از ${fa(pdf.numPages)}...`;
+    }
+    const bytes=await out.save({useObjectStreams:true,addDefaultPage:false});const blob=new Blob([bytes],{type:'application/pdf'});downloadBlob(blob,'amnayar-compressed.pdf');s.textContent=savingsText(f.size,blob.size)+` — کیفیت خروجی: ${fa(level)}٪`;
+  }catch(e){console.error(e);s.textContent='فشرده‌سازی PDF انجام نشد؛ ممکن است فایل رمزدار، آسیب‌دیده یا بسیار سنگین باشد.';}
 }
 
 // ویدئو در خود مرورگر با MediaRecorder به WebM فشرده می‌شود؛ فایل به سرور ارسال نمی‌شود.

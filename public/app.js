@@ -31,16 +31,16 @@ const siteSearchItems = [
   {title:'قیمت یورو', desc:'نمایش نرخ بازار ارز', href:'#markets', tags:'یورو ارز قیمت'},
   {title:'محاسبه‌گر طلا', desc:'محاسبه ارزش تقریبی طلا', href:'#markets', tags:'محاسبه طلا گرم عیار خرید فروش'},
   {title:'ابزارهای رایگان', desc:'مجموعه ابزارهای کاربردی', href:'#tools', tags:'ابزار رایگان'},
-  {title:'محاسبه‌گر خودرو', desc:'مقایسه قیمت کارخانه و بازار و سود یا زیان', href:'/tools.html#car', tags:'خودرو ماشین قیمت کارخانه بازار سود زیان'},
-  {title:'محاسبه‌گر طلا و سکه', desc:'خرید، فروش، اجرت، مالیات و ارزش سکه', href:'/tools.html#gold', tags:'طلا سکه گرم عیار اجرت مالیات خرید فروش'},
-  {title:'محاسبه‌گر ارز', desc:'تبدیل ارز و محاسبه سود یا زیان', href:'/tools.html#currency', tags:'ارز دلار یورو درهم لیر پوند تبدیل سود'},
-  {title:'محاسبه‌گر رهن و اجاره', desc:'تبدیل تقریبی رهن و اجاره', href:'/tools.html#rent', tags:'رهن اجاره ملک خانه تبدیل'},
-  {title:'فاکتور‌ساز فارسی', desc:'ساخت و دریافت فاکتور PDF رایگان', href:'/tools.html#invoice', tags:'فاکتور صورت حساب pdf فروشنده خریدار'},
-  {title:'ادغام و جداسازی PDF', desc:'ترکیب PDF یا جداسازی صفحات', href:'/tools.html#pdf', tags:'pdf پی دی اف ادغام جداسازی'},
-  {title:'تبدیل تاریخ', desc:'تبدیل شمسی و میلادی', href:'/tools.html#date', tags:'تاریخ شمسی میلادی تبدیل'},
-  {title:'محاسبات روزمره', desc:'درصد، تخفیف، قسط، سود و اضافه‌کاری', href:'/tools.html#calculator', tags:'درصد تخفیف قسط سود اضافه کاری'},
-  {title:'ابزار متن', desc:'شمارش، پاکسازی و تبدیل اعداد', href:'/tools.html#text', tags:'متن کلمات اعداد فارسی انگلیسی'},
-  {title:'ابزار تصویر', desc:'تغییر اندازه، فشرده‌سازی و تبدیل فرمت', href:'/tools.html#image', tags:'تصویر عکس resize compression'},
+  {title:'محاسبه‌گر خودرو', desc:'مقایسه قیمت کارخانه و بازار و سود یا زیان', href:'/tools.html?tool=car', tags:'خودرو ماشین قیمت کارخانه بازار سود زیان'},
+  {title:'محاسبه‌گر طلا و سکه', desc:'خرید، فروش، اجرت، مالیات و ارزش سکه', href:'/tools.html?tool=gold', tags:'طلا سکه گرم عیار اجرت مالیات خرید فروش'},
+  {title:'محاسبه‌گر ارز', desc:'تبدیل ارز و محاسبه سود یا زیان', href:'/tools.html?tool=currency', tags:'ارز دلار یورو درهم لیر پوند تبدیل سود'},
+  {title:'محاسبه‌گر رهن و اجاره', desc:'تبدیل تقریبی رهن و اجاره', href:'/tools.html?tool=rent', tags:'رهن اجاره ملک خانه تبدیل'},
+  {title:'فاکتور‌ساز فارسی', desc:'ساخت و دریافت فاکتور PDF رایگان', href:'/tools.html?tool=invoice', tags:'فاکتور صورت حساب pdf فروشنده خریدار'},
+  {title:'ادغام و جداسازی PDF', desc:'ترکیب PDF یا جداسازی صفحات', href:'/tools.html?tool=pdf', tags:'pdf پی دی اف ادغام جداسازی'},
+  {title:'تبدیل تاریخ', desc:'تبدیل شمسی و میلادی', href:'/tools.html?tool=date', tags:'تاریخ شمسی میلادی تبدیل'},
+  {title:'محاسبات روزمره', desc:'درصد، تخفیف، قسط، سود و اضافه‌کاری', href:'/tools.html?tool=calculator', tags:'درصد تخفیف قسط سود اضافه کاری'},
+  {title:'ابزار متن', desc:'شمارش، پاکسازی و تبدیل اعداد', href:'/tools.html?tool=text', tags:'متن کلمات اعداد فارسی انگلیسی'},
+  {title:'ابزار تصویر', desc:'تغییر اندازه، فشرده‌سازی و تبدیل فرمت', href:'/tools.html?tool=image', tags:'تصویر عکس resize compression'},
   {title:'سامانه‌های رسمی', desc:'دسترسی مستقیم به مراجع رسمی', href:'#official', tags:'سامانه رسمی استعلام'},
   {title:'چرا امنا یار؟', desc:'ویژگی‌ها و رویکرد سایت', href:'#why', tags:'امنا یار رایگان امنیت'}
 ];
@@ -96,7 +96,7 @@ async function loadPublicConfig(){
     const footerSmall=document.querySelector('footer .brand small'); if(footerSmall&&s.footer_text)footerSmall.textContent=s.footer_text;
     applyHomeLayout(s);
     const enabled=new Set((c.tools||[]).filter(x=>x.enabled).map(x=>x.slug));
-    document.querySelectorAll('.tool-tile[href*="/tools.html#"]').forEach(a=>{const slug=(a.getAttribute('href').split('#')[1]||''); if(c.tools?.length)a.style.display=enabled.has(slug)?'':'none';});
+    document.querySelectorAll('.tool-tile[href*="/tools.html?tool="]').forEach(a=>{const slug=((new URL(a.href,location.origin)).searchParams.get('tool')||''||''); if(c.tools?.length)a.style.display=enabled.has(slug)?'':'none';});
     (c.notices||[]).slice(0,1).forEach(n=>{if(!document.getElementById('publicNotice')){const bar=document.createElement('div');bar.id='publicNotice';bar.className='public-notice '+n.type;bar.innerHTML=`<b>${escapeHtml(n.title)}</b><span>${escapeHtml(n.body)}</span>`;document.body.insertBefore(bar,document.body.firstChild)}});
   }catch(e){}
 }
@@ -109,4 +109,4 @@ function applyHomeLayout(settings){
 }
 function escapeHtml(v){return String(v??'').replace(/[&<>'"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[m]))}
 loadPublicConfig();
-document.addEventListener('click',e=>{const a=e.target.closest('a[href*="/tools.html#"]');if(a){const slug=a.getAttribute('href').split('#')[1];fetch('/api/analytics/tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}).catch(()=>{})}});
+document.addEventListener('click',e=>{const a=e.target.closest('a[href*="/tools.html?tool="]');if(a){const slug=(new URL(a.href,location.origin)).searchParams.get('tool')||'';fetch('/api/analytics/tool',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({slug})}).catch(()=>{})}});

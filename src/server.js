@@ -895,7 +895,7 @@ app.get('/api/analytics/summary', async (req,res)=>{
   if(!process.env.ANALYTICS_HUB_KEY || key!==process.env.ANALYTICS_HUB_KEY) return res.status(401).json({error:'unauthorized'});
   try{
     const raw=Number(req.query.days||30), n=[7,14,30,90].includes(raw)?raw:30;
-    const [days,paths,tools,totals,users,checks,orders]=await Promise.all([
+    const [days,paths,tools,totals,users,checks,orders,registrationRows]=await Promise.all([
       q(`SELECT TO_CHAR(d.day AT TIME ZONE 'Asia/Tehran','YYYY-MM-DD') day,
           COALESCE(p.views,0)::int views,COALESCE(c.checks,0)::int checks,
           COALESCE(u.registrations,0)::int registrations
@@ -913,11 +913,12 @@ app.get('/api/analytics/summary', async (req,res)=>{
           (SELECT COUNT(*)::int FROM users WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) registrations
         `,[n]),
       q(`SELECT COUNT(*)::int registrations FROM users WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
+      q(`SELECT username,email,created_at,email_verified FROM users WHERE created_at>=NOW()-($1 * INTERVAL '1 day') ORDER BY created_at DESC LIMIT 100`,[n]),
       q(`SELECT COUNT(*)::int checks FROM checks WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
       q(`SELECT COUNT(*)::int orders,COALESCE(SUM(amount_toman) FILTER (WHERE status IN ('paid','approved','success')),0)::bigint revenue_toman FROM payment_orders WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n])
     ]);
     res.json({
-      period_days:n,days:days.rows,paths:paths.rows,tools:tools.rows,recent_logins:[],
+      period_days:n,days:days.rows,paths:paths.rows,tools:tools.rows,registrations:registrationRows.rows,recent_logins:[],
       totals:{
         views:Number(totals.rows[0]?.views||0),visitors:0,tool_uses:Number(totals.rows[0]?.tool_uses||0),
         logins:0,registrations:Number(users.rows[0]?.registrations||0),checks:Number(checks.rows[0]?.checks||0),

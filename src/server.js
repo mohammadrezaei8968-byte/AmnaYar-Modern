@@ -895,20 +895,35 @@ app.get('/api/analytics/summary', async (req,res)=>{
   if(!process.env.ANALYTICS_HUB_KEY || key!==process.env.ANALYTICS_HUB_KEY) return res.status(401).json({error:'unauthorized'});
   try{
     const raw=Number(req.query.days||30), n=[7,14,30,90].includes(raw)?raw:30;
-    const [days,paths,tools,totals,users,checks,orders,logins]=await Promise.all([
-      q(`SELECT TO_CHAR(created_at AT TIME ZONE 'Asia/Tehran','YYYY-MM-DD') day,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY 1 ORDER BY 1`,[n]),
+    const [days,paths,tools,totals,users,checks,orders]=await Promise.all([
+      q(`SELECT TO_CHAR(d.day AT TIME ZONE 'Asia/Tehran','YYYY-MM-DD') day,
+          COALESCE(p.views,0)::int views,COALESCE(c.checks,0)::int checks,
+          COALESCE(u.registrations,0)::int registrations
+         FROM generate_series((NOW()-($1 * INTERVAL '1 day'))::date,NOW()::date,INTERVAL '1 day') d(day)
+         LEFT JOIN (SELECT created_at::date day,COUNT(*) views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY 1) p ON p.day=d.day::date
+         LEFT JOIN (SELECT created_at::date day,COUNT(*) checks FROM checks WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY 1) c ON c.day=d.day::date
+         LEFT JOIN (SELECT created_at::date day,COUNT(*) registrations FROM users WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY 1) u ON u.day=d.day::date
+         ORDER BY d.day`,[n]),
       q(`SELECT path,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY path ORDER BY views DESC LIMIT 20`,[n]),
       q(`SELECT COALESCE(ts.name,tu.tool_slug) name,tu.tool_slug,COUNT(*)::int uses FROM tool_usage tu LEFT JOIN tool_settings ts ON ts.slug=tu.tool_slug WHERE tu.created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY ts.name,tu.tool_slug ORDER BY uses DESC LIMIT 20`,[n]),
-      q(`SELECT COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
+      q(`SELECT
+          (SELECT COUNT(*)::int FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) views,
+          (SELECT COUNT(*)::int FROM tool_usage WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) tool_uses,
+          (SELECT COUNT(*)::int FROM checks WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) checks,
+          (SELECT COUNT(*)::int FROM users WHERE created_at>=NOW()-($1 * INTERVAL '1 day')) registrations
+        `,[n]),
       q(`SELECT COUNT(*)::int registrations FROM users WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
       q(`SELECT COUNT(*)::int checks FROM checks WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
-      q(`SELECT COUNT(*)::int orders,COALESCE(SUM(amount_toman) FILTER (WHERE status='paid'),0)::bigint revenue_toman FROM purchases WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
-      q(`SELECT COUNT(*)::int logins FROM login_logs WHERE success=true AND created_at>=NOW()-($1 * INTERVAL '1 day')`,[n])
+      q(`SELECT COUNT(*)::int orders,COALESCE(SUM(amount_toman) FILTER (WHERE status IN ('paid','approved','success')),0)::bigint revenue_toman FROM payment_orders WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n])
     ]);
-    res.json({period_days:n,days:days.rows,paths:paths.rows,tools:tools.rows,recent_logins:[],
-      totals:{views:totals.rows[0]?.views||0,visitors:0,tool_uses:tools.rows.reduce((s,x)=>s+Number(x.uses||0),0),
-        logins:logins.rows[0]?.logins||0,registrations:users.rows[0]?.registrations||0,checks:checks.rows[0]?.checks||0,
-        orders:orders.rows[0]?.orders||0,revenue_toman:Number(orders.rows[0]?.revenue_toman||0)}}); 
+    res.json({
+      period_days:n,days:days.rows,paths:paths.rows,tools:tools.rows,recent_logins:[],
+      totals:{
+        views:Number(totals.rows[0]?.views||0),visitors:0,tool_uses:Number(totals.rows[0]?.tool_uses||0),
+        logins:0,registrations:Number(users.rows[0]?.registrations||0),checks:Number(checks.rows[0]?.checks||0),
+        orders:Number(orders.rows[0]?.orders||0),revenue_toman:Number(orders.rows[0]?.revenue_toman||0)
+      }
+    });
   }catch(e){console.error('analytics summary:',e);res.status(500).json({error:'analytics_unavailable'});}
 });
 

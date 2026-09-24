@@ -877,6 +877,41 @@ app.get('/api/public-config', async (req,res) => {
     res.json({settings:Object.fromEntries(settings.rows.map(x=>[x.key,x.value])),tools:tools.rows,notices:notices.rows});
   } catch(e) { res.json({settings:{},tools:[],notices:[]}); }
 });
+
+// Shared analytics hub for the legacy AmnaYar frontend/API.
+app.post('/api/analytics/ingest', async (req,res)=>{
+  const key=String(req.get('X-Amna-Analytics-Key')||'');
+  if(!process.env.ANALYTICS_HUB_KEY || key!==process.env.ANALYTICS_HUB_KEY) return res.status(401).json({error:'unauthorized'});
+  const type=String(req.body?.event_type||'').trim();
+  if(!['page_view','tool_use'].includes(type)) return res.status(400).json({error:'invalid_event'});
+  const path=String(req.body?.path||'/').slice(0,300);
+  const slug=String(req.body?.tool_slug||req.body?.meta?.tool||'').slice(0,120);
+  if(type==='page_view') await q('INSERT INTO page_views(path) VALUES($1)',[path]);
+  else if(slug) await q('INSERT INTO tool_usage(tool_slug) VALUES($1)',[slug]);
+  res.status(204).end();
+});
+app.get('/api/analytics/summary', async (req,res)=>{
+  const key=String(req.get('X-Amna-Analytics-Key')||'');
+  if(!process.env.ANALYTICS_HUB_KEY || key!==process.env.ANALYTICS_HUB_KEY) return res.status(401).json({error:'unauthorized'});
+  try{
+    const raw=Number(req.query.days||30), n=[7,14,30,90].includes(raw)?raw:30;
+    const [days,paths,tools,totals,users,checks,orders,logins]=await Promise.all([
+      q(`SELECT TO_CHAR(created_at AT TIME ZONE 'Asia/Tehran','YYYY-MM-DD') day,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY 1 ORDER BY 1`,[n]),
+      q(`SELECT path,COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY path ORDER BY views DESC LIMIT 20`,[n]),
+      q(`SELECT COALESCE(ts.name,tu.tool_slug) name,tu.tool_slug,COUNT(*)::int uses FROM tool_usage tu LEFT JOIN tool_settings ts ON ts.slug=tu.tool_slug WHERE tu.created_at>=NOW()-($1 * INTERVAL '1 day') GROUP BY ts.name,tu.tool_slug ORDER BY uses DESC LIMIT 20`,[n]),
+      q(`SELECT COUNT(*)::int views FROM page_views WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
+      q(`SELECT COUNT(*)::int registrations FROM users WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
+      q(`SELECT COUNT(*)::int checks FROM checks WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
+      q(`SELECT COUNT(*)::int orders,COALESCE(SUM(amount_toman) FILTER (WHERE status='paid'),0)::bigint revenue_toman FROM purchases WHERE created_at>=NOW()-($1 * INTERVAL '1 day')`,[n]),
+      q(`SELECT COUNT(*)::int logins FROM login_logs WHERE success=true AND created_at>=NOW()-($1 * INTERVAL '1 day')`,[n])
+    ]);
+    res.json({period_days:n,days:days.rows,paths:paths.rows,tools:tools.rows,recent_logins:[],
+      totals:{views:totals.rows[0]?.views||0,visitors:0,tool_uses:tools.rows.reduce((s,x)=>s+Number(x.uses||0),0),
+        logins:logins.rows[0]?.logins||0,registrations:users.rows[0]?.registrations||0,checks:checks.rows[0]?.checks||0,
+        orders:orders.rows[0]?.orders||0,revenue_toman:Number(orders.rows[0]?.revenue_toman||0)}}); 
+  }catch(e){console.error('analytics summary:',e);res.status(500).json({error:'analytics_unavailable'});}
+});
+
 app.post('/api/analytics/tool', async (req,res) => {
   const slug=String(req.body?.slug||'').trim().slice(0,80);
   if(slug) await q('INSERT INTO tool_usage(tool_slug) VALUES($1)',[slug]).catch(()=>{});
